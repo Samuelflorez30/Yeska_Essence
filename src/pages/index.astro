@@ -137,7 +137,9 @@ const campoFondo = [
 // nítido), parallax 1.15×.
 const campoFrente = [
   { n: 3,  x: 5,  y: 74, s: 'clamp(100px, 15vw, 180px)', r: 3,  f: 4,  xm: -2, ym: 84 },
-  { n: 10, x: 82, y: 88, s: 'clamp(48px, 5vw, 80px)',    r: 7,  f: 7, ym: 84 },
+  // En móvil la esquina inferior derecha es de los botones flotantes
+  // (WhatsApp y favoritos): esta pieza se corre al centro-derecha.
+  { n: 10, x: 82, y: 88, s: 'clamp(48px, 5vw, 80px)',    r: 7,  f: 7, xm: 62, ym: 79 },
   // n1 y n5 flanquean el titular por fuera de su columna de 1000px (arriba-
   // izquierda y a la altura de "en recuerdos"). Si el hero es angosto y no
   // hay margen real, calc() las saca de pantalla en vez de amontonarlas

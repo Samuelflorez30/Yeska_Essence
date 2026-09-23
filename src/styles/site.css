@@ -60,6 +60,9 @@
   --ease: cubic-bezier(.2, .7, .2, 1);
   --borde-arco: 50% 50% 12px 12px / 38% 38% 12px 12px;
   --flota-b: clamp(16px, 4vw, 28px);
+  /* Alto fijo del header: el hero lo resta para llenar justo la primera
+     pantalla, y las anclas lo usan para no quedar debajo del nav. */
+  --nav-h: clamp(72px, calc(6.3vw + 26px), 110px);
   color-scheme: light;
 }
 
@@ -242,7 +245,7 @@ a { color: inherit; }
   backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px);
   box-shadow: 0 10px 30px -24px rgba(61, 40, 38, .5);
 }
-.nav .wrap { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding-block: 14px; }
+.nav .wrap { display: flex; align-items: center; justify-content: space-between; gap: 16px; height: var(--nav-h); }
 .brand { display: flex; align-items: center; gap: clamp(8px, 2.2vw, 20px); text-decoration: none; color: var(--tinta); }
 /* El PNG no es un circulo puro (filigrana arriba y a los lados sobre alfa):
    sin border-radius, para no recortarle los adornos. */
@@ -258,7 +261,9 @@ a { color: inherit; }
   transition: color .3s var(--ease);
 }
 .brand:hover .brand-word { color: var(--oro-inmersivo); }
-@media (max-width: 380px) { .brand-word { display: none; } }
+/* Mismo corte que los enlaces: por debajo de escritorio el nav queda en
+   solo isotipo + botón de menú. */
+@media (max-width: 1024px) { .brand-word { display: none; } }
 .nav-right { display: flex; align-items: center; gap: 22px; }
 .nav-izq { display: none; }
 /* Escritorio: marca al centro, dos enlaces a cada lado. */
@@ -281,26 +286,22 @@ a { color: inherit; }
 .nav-links a:hover::after { transform: scaleX(1); transform-origin: left; }
 @media (max-width: 1024px) { .nav-links { display: none; } }
 
-/* La hamburguesa no existe hasta que se hace scroll: arriba del todo la
-   primera impresión es solo la marca y el titular. */
+/* En móvil y tablet la hamburguesa es la única puerta al menú: visible
+   desde el primer pintado, no solo después de hacer scroll. */
 .menu-btn {
   position: relative; width: 48px; height: 48px; border-radius: 50%; cursor: pointer;
   border: 1px solid var(--filete-tenue); background: rgba(255, 255, 255, .5);
   display: grid; place-items: center;
-  opacity: 0; transform: translateY(-10px); pointer-events: none;
-  transition: opacity .4s var(--ease), transform .4s var(--ease), background .25s;
+  transition: background .25s;
 }
-.nav.scrolled .menu-btn, .menu.open ~ * .menu-btn { opacity: 1; transform: none; pointer-events: auto; }
 .menu-btn:hover { background: rgba(255, 255, 255, .85); }
 .menu-btn i { position: absolute; width: 20px; height: 1.5px; background: var(--tinta); border-radius: 2px; transition: transform .4s var(--ease), opacity .3s; }
 .menu-btn i:nth-child(1) { transform: translateY(-6px); }
 .menu-btn i:nth-child(3) { transform: translateY(6px); }
-.menu-btn[aria-expanded="true"] { opacity: 1; transform: none; pointer-events: auto; }
 .menu-btn[aria-expanded="true"] i:nth-child(1) { transform: rotate(45deg); }
 .menu-btn[aria-expanded="true"] i:nth-child(2) { opacity: 0; transform: scaleX(0); }
 .menu-btn[aria-expanded="true"] i:nth-child(3) { transform: rotate(-45deg); }
-/* En escritorio los enlaces estan en el header: la hamburguesa no existe,
-   ni siquiera con scroll (la regla .scrolled de arriba no mira el ancho). */
+/* En escritorio los enlaces están en el header: la hamburguesa no existe. */
 @media (min-width: 1025px) { .menu-btn { display: none !important; } }
 
 /* ------------------------------------------------- menú a pantalla completa --- */
@@ -411,7 +412,16 @@ a { color: inherit; }
 
 /* ---------------------------------------------------------------- hero --- */
 /* Boceto 3: manifiesto a sangre, campo denso, sin CTA ruidoso. */
-.hero { position: relative; overflow: hidden; min-height: clamp(560px, 92vh, 880px); display: grid; align-items: center; }
+/* El hero es la primera pantalla completa y nada más: alto de la ventana
+   menos el header, para que la cinta dorada y "Nuestra esencia" no se
+   asomen al cargar. svh (no vh/dvh) = el alto con las barras del
+   navegador móvil visibles, así cabe aunque la barra de URL no se oculte,
+   y no salta de tamaño mientras se hace scroll. */
+.hero {
+  position: relative; overflow: hidden; display: grid; align-items: center;
+  min-height: calc(100vh - var(--nav-h));
+  min-height: calc(100svh - var(--nav-h));
+}
 .hero .wrap { position: relative; z-index: 10; padding-block: clamp(72px, 12vh, 150px); text-align: center; }
 .hero .titular { max-width: min(100%, 1000px); margin-inline: auto; }
 .hero h1 {
@@ -449,7 +459,7 @@ a { color: inherit; }
 @keyframes rodar { to { transform: translateX(-50%); } }
 
 /* ------------------------------------------------------------ secciones --- */
-section { scroll-margin-top: 84px; }
+section { scroll-margin-top: var(--nav-h); }
 .section { padding-block: clamp(72px, 10vw, 136px); position: relative; }
 /* Las capas flotantes se derraman a propósito hacia
    los márgenes. Se recortan solo en horizontal — así no generan scroll lateral
@@ -873,7 +883,6 @@ footer .lema { font-family: "Fraunces", serif; font-variation-settings: "opsz" 4
   .rec-grid { grid-template-columns: 1fr; }
 }
 @media (max-width: 767px) {
-  .hero { min-height: 0; }
   .hero h1 { font-size: clamp(2.6rem, 11vw, 3.4rem); }
   .hero .titular { max-width: none; }
   .section { padding-block: clamp(56px, 12vw, 80px); }
