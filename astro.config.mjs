@@ -8,5 +8,5 @@ export default defineConfig({
   adapter: vercel(),
   // Dominio real de producción: lo necesitan las URLs canónicas, Open Graph
   // y el sitemap para no generar enlaces rotos o apuntando a localhost.
-  site: 'https://TU-DOMINIO-AQUI',
+  site: 'https://yeskaessence.com',
 });
