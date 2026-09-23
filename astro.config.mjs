@@ -1,5 +1,5 @@
 import { defineConfig } from 'astro/config';
-import vercel from '@astrojs/vercel/serverless';
+import vercel from '@astrojs/vercel';
 
 // SSR (no estático): así los cambios que la dueña haga en el panel
 // se ven en el sitio público al instante, sin tener que "reconstruir" el sitio.
