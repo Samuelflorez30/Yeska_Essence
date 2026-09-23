@@ -24,9 +24,14 @@ const productos = (productosRaw ?? []).map((p) => ({
   line: (p.lineas as unknown as { slug: string } | null)?.slug ?? 'recipientes',
   mat: p.materiales,
   p: cop(p.precio),
+  precio: p.precio,
   note: p.nota || undefined,
   img: p.imagen_url || '/img/logo-badge.png',
 }));
+// Mismo mapa que usa el script del cliente (línea 640): se repite aquí, no
+// se comparte, porque este archivo vive en dos mundos (frontmatter de
+// servidor vs. <script> de navegador) que no importan variables entre sí.
+const lineName: Record<string, string> = { flores: 'Flores', botanica: 'Botánica', figuras: 'Figuras', recipientes: 'Recipientes' };
 
 const { data: recordatoriosRaw, error: recordatoriosError } = await supabase
   .from('recordatorios')
@@ -200,6 +205,32 @@ const anchoMax = (s: string) => parseInt(s.match(/(\d+)px\)$/)?.[1] ?? '300', 10
     priceRange: '$$',
     address: { '@type': 'PostalAddress', addressCountry: 'CO' },
     sameAs: ['https://www.instagram.com/Yeska_Essence'],
+  })} />
+
+  <!-- Datos estructurados: el catálogo, para resultados enriquecidos de producto.
+       Sin URL propia por pieza (todo vive en /#coleccion), así que las tres
+       apuntan a la misma página — sigue siendo válido para Google. -->
+  <script type="application/ld+json" set:html={JSON.stringify({
+    '@context': 'https://schema.org',
+    '@type': 'ItemList',
+    itemListElement: productos.map((x, i) => ({
+      '@type': 'ListItem',
+      position: i + 1,
+      item: {
+        '@type': 'Product',
+        name: x.n,
+        description: x.mat,
+        image: x.img,
+        url: canonicalURL.toString(),
+        offers: {
+          '@type': 'Offer',
+          price: x.precio,
+          priceCurrency: 'COP',
+          availability: 'https://schema.org/InStock',
+          url: canonicalURL.toString(),
+        },
+      },
+    })),
   })} />
 </head>
 <body>
@@ -419,8 +450,31 @@ const anchoMax = (s: string) => parseInt(s.match(/(\d+)px\)$/)?.[1] ?? '300', 10
           </button>
         </div>
       </div>
-      <p class="count" id="count" aria-live="polite"></p>
-      <div class="products" id="products"></div>
+      <p class="count" id="count" aria-live="polite">{productos.length} piezas</p>
+      <!-- Renderizado en el servidor (antes solo lo pintaba el script del
+           cliente): Google y cualquier cosa que no ejecute JS ahora sí ven
+           el catálogo completo en el HTML. El script de más abajo sigue
+           siendo el dueño de esta grilla — en cuanto carga, la vuelve a
+           pintar él mismo (con favoritos, filtro y orden ya aplicados);
+           esto es solo el primer pintado. -->
+      <div class="products" id="products">
+        {productos.map((x, i) => (
+          <article class="card" data-line={x.line} data-id={x.id} style={`animation-delay:${Math.min(i, 10) * 50}ms`}>
+            <div class="photo">
+              <img src={x.img} alt={`${x.n}: ${x.mat}`} width="400" height="500" loading="lazy" decoding="async">
+              <button type="button" class="qv-trigger" data-id={x.id} aria-label={`Ver detalle de ${x.n}`}></button>
+              <span class="tag" data-line={x.line}>{lineName[x.line]}</span>
+              <button type="button" class="fav-btn" data-id={x.id} aria-pressed="false" aria-label="Guardar en favoritos">
+                <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 21s-7.5-4.6-10.2-9.1C.1 8.9 1 5.4 4.2 4.2 6.5 3.3 9 4 12 6.8 15 4 17.5 3.3 19.8 4.2c3.2 1.2 4.1 4.7 2.4 7.7C19.5 16.4 12 21 12 21Z"/></svg>
+              </button>
+            </div>
+            <div class="info">
+              <h3>{x.n}</h3>
+              <div class="price">{x.p}{x.note && <small>{x.note}</small>}</div>
+            </div>
+          </article>
+        ))}
+      </div>
     </div>
   </section>
 
