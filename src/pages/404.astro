@@ -1,0 +1,40 @@
+---
+import '../styles/site.css';
+---
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="robots" content="noindex, follow">
+  <title>Página no encontrada · Yeska Essence</title>
+  <meta name="description" content="Esta página no existe. Vuelve al inicio de Yeska Essence.">
+  <link rel="icon" href="/favicon.ico" sizes="32x32">
+  <link rel="apple-touch-icon" href="/apple-touch-icon.png">
+  <link rel="preload" as="font" type="font/woff2" href="/fonts/fraunces-latin.woff2" crossorigin>
+  <link rel="preload" as="font" type="font/woff2" href="/fonts/karla-latin.woff2" crossorigin>
+</head>
+<body>
+  <div class="ambiente" aria-hidden="true"><i class="vineta"></i><i class="luz"></i></div>
+  <main class="error-404 amb-inmersivo">
+    <a class="brand" href="/" aria-label="Yeska Essence, inicio">
+      <img src="/img/logo-badge.png" alt="" width="80" height="84">
+    </a>
+    <p class="script gold" style="font-size: 1.4rem;">404</p>
+    <h1 class="display">Esta página <span class="gold">se apagó</span></h1>
+    <p class="lead">El enlace que seguiste no existe o ya no está disponible.</p>
+    <a class="btn btn-oro" href="/">Volver al inicio</a>
+  </main>
+</body>
+</html>
+
+<style>
+  .error-404 {
+    min-height: 100vh; display: flex; flex-direction: column; align-items: center;
+    justify-content: center; gap: 14px; text-align: center; padding: 24px;
+  }
+  .error-404 .brand img { width: clamp(56px, 8vw, 80px); height: auto; margin-bottom: 8px; }
+  .error-404 h1 { font-size: clamp(2rem, 6vw, 3.2rem); }
+  .error-404 .lead { max-width: 46ch; }
+  .error-404 .btn { margin-top: 10px; }
+</style>

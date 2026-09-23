@@ -59,6 +59,17 @@ const origenFotos = (() => {
   try { return new URL(import.meta.env.PUBLIC_SUPABASE_URL).origin; } catch { return null; }
 })();
 
+// SEO: URLs absolutas a partir de `site` (astro.config.mjs). Con esto el
+// canonical y las tarjetas de Open Graph/Twitter apuntan siempre al dominio
+// real, incluso si el sitio se sirve un día desde un subdominio o preview.
+// El `?? ` es solo por si el server de dev arrancó antes de fijar `site` en
+// la config (no recarga ese valor en caliente); en build siempre llega bien.
+const sitioBase = Astro.site ?? new URL('https://yeskaessence.com');
+const canonicalURL = new URL(Astro.url.pathname, sitioBase);
+const ogImageURL = new URL('/og-image.png', sitioBase);
+const tituloSEO = 'Yeska Essence — Velas artesanales en cera de soja y yeso | Colombia';
+const descripcionSEO = 'Velas artesanales hechas a mano en Colombia: figuras y arreglos en cera de soja y yeso, recordatorios para XV años, bodas y bautizos, y pedidos personalizados por WhatsApp.';
+
 // En los pedestales solo entran piezas con recorte sin fondo: una foto con
 // mesa y pared detrás no puede levitar. Terraza Inmortal no tiene recorte,
 // así que su lugar lo toma Esencia del Desierto (misma línea botánica).
@@ -139,14 +150,57 @@ const anchoMax = (s: string) => parseInt(s.match(/(\d+)px\)$/)?.[1] ?? '300', 10
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Yeska Essence — Velas artesanales</title>
-  <meta name="description" content="Velas artesanales en cera de soja y yeso, hechas a mano en Colombia. Catálogo, recordatorios para eventos y pedidos por WhatsApp.">
+  <meta name="robots" content="index, follow">
+  <link rel="canonical" href={canonicalURL} />
+  <title>{tituloSEO}</title>
+  <meta name="description" content={descripcionSEO}>
+
+  <!-- Open Graph (WhatsApp, Instagram, Facebook) -->
+  <meta property="og:type" content="website">
+  <meta property="og:site_name" content="Yeska Essence">
+  <meta property="og:locale" content="es_CO">
+  <meta property="og:url" content={canonicalURL}>
+  <meta property="og:title" content={tituloSEO}>
+  <meta property="og:description" content={descripcionSEO}>
+  <meta property="og:image" content={ogImageURL}>
+  <meta property="og:image:width" content="1200">
+  <meta property="og:image:height" content="630">
+  <meta property="og:image:alt" content="Yeska Essence — velas artesanales en cera de soja y yeso">
+
+  <!-- Twitter / X Card -->
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:title" content={tituloSEO}>
+  <meta name="twitter:description" content={descripcionSEO}>
+  <meta name="twitter:image" content={ogImageURL}>
+
+  <!-- Icono y color de marca en pestañas, marcadores y al agregar a inicio -->
+  <link rel="icon" href="/favicon.ico" sizes="32x32">
+  <link rel="icon" type="image/png" sizes="16x16" href="/favicon-16x16.png">
+  <link rel="icon" type="image/png" sizes="32x32" href="/favicon-32x32.png">
+  <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png">
+  <link rel="manifest" href="/site.webmanifest">
+  <meta name="theme-color" content="#C49A45">
+
   <!-- Fuentes propias (ver @font-face en site.css). Se precargan las dos caras
        del primer pintado; la italica y la script entran despues sin bloquear. -->
   <link rel="preload" as="font" type="font/woff2" href="/fonts/fraunces-latin.woff2" crossorigin>
   <link rel="preload" as="font" type="font/woff2" href="/fonts/karla-latin.woff2" crossorigin>
   {origenFotos && <link rel="preconnect" href={origenFotos} crossorigin />}
   <script is:inline>document.documentElement.classList.add('js');</script>
+
+  <!-- Datos estructurados: ficha de negocio local para Google -->
+  <script type="application/ld+json" set:html={JSON.stringify({
+    '@context': 'https://schema.org',
+    '@type': 'Store',
+    name: 'Yeska Essence',
+    description: descripcionSEO,
+    image: ogImageURL.toString(),
+    url: canonicalURL.toString(),
+    telephone: '+573214034007',
+    priceRange: '$$',
+    address: { '@type': 'PostalAddress', addressCountry: 'CO' },
+    sameAs: ['https://www.instagram.com/Yeska_Essence'],
+  })} />
 </head>
 <body>
 
@@ -242,11 +296,11 @@ const anchoMax = (s: string) => parseInt(s.match(/(\d+)px\)$/)?.[1] ?? '300', 10
       </div>
     </div>
 
-    <!-- capa de frente: piezas grandes y nítidas, parallax 1.15× -->
+    <!-- capa de frente: el plano más cercano (sigue desenfocado), parallax 1.15× -->
     <div class="campo campo-frente" aria-hidden="true">
       {campoFrente.map((c) => (
         <div class="par" data-par="1.15" data-tier={c.tier} style={`--x:${pos(c.x)}; --y:${pos(c.y)}; --xm:${pos(c.xm ?? c.x)}; --ym:${pos(c.ym ?? c.y)}; --s:${c.s}`}>
-          <Image class={`flota capa-frente f${c.f}`} style={`--r:${c.r}deg; --sc:${c.sc ?? 1}`} src={recorte(c.n)} alt="" width={anchoMax(c.s)} densities={[1, 2]} format="webp" quality={75} loading="eager" decoding="async" fetchpriority="low" />
+          <Image class={`flota capa-frente f${c.f}`} style={`--r:${c.r}deg`} src={recorte(c.n)} alt="" width={anchoMax(c.s)} densities={[1, 2]} format="webp" quality={75} loading="eager" decoding="async" fetchpriority="low" />
         </div>
       ))}
     </div>

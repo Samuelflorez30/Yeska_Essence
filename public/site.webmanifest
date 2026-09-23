@@ -1,0 +1,14 @@
+{
+  "name": "Yeska Essence",
+  "short_name": "Yeska Essence",
+  "description": "Velas artesanales en cera de soja y yeso, hechas a mano en Colombia.",
+  "start_url": "/",
+  "display": "standalone",
+  "lang": "es",
+  "theme_color": "#C49A45",
+  "background_color": "#D1B4B0",
+  "icons": [
+    { "src": "/icon-192.png", "sizes": "192x192", "type": "image/png" },
+    { "src": "/icon-512.png", "sizes": "512x512", "type": "image/png" }
+  ]
+}
