@@ -1,0 +1,143 @@
+---
+import '../styles/admin.css';
+
+interface Props { title: string; current: 'inicio' | 'productos' | 'recordatorios' }
+const { title, current } = Astro.props;
+
+const links = [
+  { href: '/admin', key: 'inicio', label: 'Inicio', icon: 'home' },
+  { href: '/admin/productos', key: 'productos', label: 'Productos', icon: 'grid' },
+  { href: '/admin/recordatorios', key: 'recordatorios', label: 'Recordatorios', icon: 'gift' },
+];
+const icons: Record<string, string> = {
+  home: '<path d="M4 11.5 12 4l8 7.5"/><path d="M6 10v9a1 1 0 0 0 1 1h3v-6h4v6h3a1 1 0 0 0 1-1v-9"/>',
+  grid: '<rect x="4" y="4" width="7" height="7" rx="1.5"/><rect x="13" y="4" width="7" height="7" rx="1.5"/><rect x="4" y="13" width="7" height="7" rx="1.5"/><rect x="13" y="13" width="7" height="7" rx="1.5"/>',
+  gift: '<rect x="4" y="9" width="16" height="11" rx="1"/><path d="M12 9v11M4 9h16M8.5 9C6 9 5 7 6 5.5 7.5 4 9.5 5 12 9c2.5-4 4.5-5 6-3.5C19 7 18 9 15.5 9"/>',
+  sitio: '<path d="M14 4h6v6"/><path d="M20 4 11 13"/><path d="M18 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h5"/>',
+  salir: '<path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><path d="M16 17l5-5-5-5"/><path d="M21 12H9"/>',
+};
+---
+<!doctype html>
+<html lang="es" class="sesion-pendiente">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="robots" content="noindex, nofollow">
+  <title>{title} · Panel Yeska Essence</title>
+  <link rel="icon" href="/img/logo-badge.png">
+  <link rel="preload" as="font" type="font/woff2" href="/fonts/fraunces-latin.woff2" crossorigin>
+  <link rel="preload" as="font" type="font/woff2" href="/fonts/karla-latin.woff2" crossorigin>
+</head>
+<body>
+  <a class="saltar" href="#contenido">Saltar al contenido</a>
+
+  <div class="pantalla-sesion" aria-live="polite">
+    <img src="/img/logo-badge.png" alt="" width="72" height="72">
+    <span>Verificando tu sesión…</span>
+    <noscript>El panel necesita JavaScript activado.</noscript>
+  </div>
+
+  <div class="shell">
+    <header class="topbar">
+      <a class="side-brand" href="/admin">
+        <img src="/img/logo-badge.png" alt="" width="36" height="36">
+        <span><b>Yeska Essence</b></span>
+      </a>
+      <button class="menu-btn" id="menuBtn" type="button" aria-label="Abrir menú" aria-expanded="false" aria-controls="side">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16"/></svg>
+      </button>
+    </header>
+
+    <aside class="side" id="side" aria-label="Menú del panel">
+      <a class="side-brand" href="/admin">
+        <img src="/img/logo-badge.png" alt="" width="44" height="44">
+        <span><b>Yeska Essence</b><small>Panel de la tienda</small></span>
+      </a>
+      <nav aria-label="Secciones del panel">
+        <p class="side-titulo">Catálogo</p>
+        {links.map((l) => (
+          <a class="side-link" href={l.href} aria-current={current === l.key ? 'page' : undefined}>
+            <svg viewBox="0 0 24 24" aria-hidden="true" set:html={icons[l.icon]} />
+            {l.label}
+          </a>
+        ))}
+      </nav>
+      <div class="side-spacer"></div>
+      <div class="side-pie">
+        <a class="side-link" href="/" target="_blank" rel="noopener">
+          <svg viewBox="0 0 24 24" aria-hidden="true" set:html={icons.sitio} />
+          Ver sitio público
+          <span class="sr-only">(abre en otra pestaña)</span>
+        </a>
+        <button class="side-link" id="logoutBtn" type="button">
+          <svg viewBox="0 0 24 24" aria-hidden="true" set:html={icons.salir} />
+          Cerrar sesión
+        </button>
+        <p class="side-user"><span>Sesión de</span><span id="userEmail">…</span></p>
+      </div>
+    </aside>
+    <div class="velo" id="velo"></div>
+
+    <main class="main" id="contenido" tabindex="-1">
+      <div class="contenido">
+        <slot />
+      </div>
+    </main>
+  </div>
+
+  <div class="toast-stack" id="toastStack" aria-live="polite"></div>
+
+  <dialog class="dialogo" id="confirmDialog" aria-labelledby="confirmTitulo" aria-describedby="confirmMensaje">
+    <form method="dialog">
+      <span class="ico-peligro" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M3 6h18M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2m3 0-1 14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2L4 6"/></svg></span>
+      <h2 id="confirmTitulo" data-titulo></h2>
+      <p id="confirmMensaje" data-mensaje></p>
+      <div class="acciones">
+        <button class="btn btn-line" value="cancel" autofocus>Cancelar</button>
+        <button class="btn btn-danger" value="ok" data-accion>Eliminar</button>
+      </div>
+    </form>
+  </dialog>
+
+  <script>
+    import { requireSession, vigilarSesion, wireLogout, showUserEmail } from '../lib/authGuard.js';
+
+    const sesion = await requireSession();
+    if (sesion) {
+      document.documentElement.classList.remove('sesion-pendiente');
+      showUserEmail(document.getElementById('userEmail'), sesion);
+      vigilarSesion();
+      wireLogout(document.getElementById('logoutBtn') as HTMLButtonElement);
+    }
+
+    // Menú lateral en pantallas estrechas: cajón con velo, Escape lo cierra
+    // y el foco vuelve al botón que lo abrió.
+    const side = document.getElementById('side')!;
+    const velo = document.getElementById('velo')!;
+    const menuBtn = document.getElementById('menuBtn')!;
+    const estrecho = window.matchMedia('(max-width: 899px)');
+    // En escritorio el menú siempre está a la vista; en móvil queda fuera
+    // del orden de tabulación (inert) mientras está cerrado.
+    const sincronizar = () => {
+      side.toggleAttribute('inert', estrecho.matches && !side.classList.contains('abierto'));
+    };
+    const setMenu = (abrir: boolean, devolverFoco = true) => {
+      side.classList.toggle('abierto', abrir);
+      velo.classList.toggle('abierto', abrir);
+      document.body.classList.toggle('bloqueado', abrir);
+      menuBtn.setAttribute('aria-expanded', String(abrir));
+      menuBtn.setAttribute('aria-label', abrir ? 'Cerrar menú' : 'Abrir menú');
+      sincronizar();   // antes de mover el foco: un elemento inert no lo recibe
+      if (abrir) side.querySelector<HTMLElement>('a, button')?.focus();
+      else if (devolverFoco && estrecho.matches) menuBtn.focus();
+    };
+    menuBtn.addEventListener('click', () => setMenu(!side.classList.contains('abierto')));
+    velo.addEventListener('click', () => setMenu(false));
+    document.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape' && side.classList.contains('abierto')) setMenu(false);
+    });
+    estrecho.addEventListener('change', () => setMenu(false, false));
+    sincronizar();
+  </script>
+</body>
+</html>

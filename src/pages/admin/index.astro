@@ -1,0 +1,114 @@
+---
+import AdminLayout from '../../layouts/AdminLayout.astro';
+---
+<AdminLayout title="Inicio" current="inicio">
+  <div class="page-head">
+    <div>
+      <span class="eyebrow">Panel de la tienda</span>
+      <h1 id="saludo">Hola</h1>
+      <p>Así está tu catálogo hoy. Toca una cifra para ir directo a esas piezas.</p>
+    </div>
+  </div>
+
+  <div class="stats" aria-busy="true" id="stats">
+    <a class="tarjeta stat" href="/admin/productos?estado=visibles">
+      <span class="etq">Productos visibles</span>
+      <span class="cifra" id="nVisibles">—</span>
+      <span class="pie">Ver productos →</span>
+    </a>
+    <a class="tarjeta stat" href="/admin/productos?estado=ocultos">
+      <span class="etq">Productos ocultos</span>
+      <span class="cifra" id="nOcultos">—</span>
+      <span class="pie">No aparecen en el sitio →</span>
+    </a>
+    <a class="tarjeta stat" href="/admin/recordatorios">
+      <span class="etq">Recordatorios visibles</span>
+      <span class="cifra" id="nRecs">—</span>
+      <span class="pie">Ver recordatorios →</span>
+    </a>
+    <a class="tarjeta stat" href="/admin/productos?estado=sin-foto" id="statSinFoto">
+      <span class="etq">Piezas sin foto</span>
+      <span class="cifra" id="nSinFoto">—</span>
+      <span class="pie">Agregar fotos →</span>
+    </a>
+  </div>
+
+  <div class="inicio-grid">
+    <section class="tarjeta tarjeta-pad" aria-labelledby="recientesTitulo">
+      <div class="tarjeta-head">
+        <h2 id="recientesTitulo">Últimos cambios</h2>
+      </div>
+      <ul class="recientes" id="recientes">
+        <li><div class="esqueleto"></div></li>
+        <li><div class="esqueleto"></div></li>
+        <li><div class="esqueleto"></div></li>
+      </ul>
+    </section>
+
+    <section class="tarjeta tarjeta-pad" aria-labelledby="accesosTitulo">
+      <div class="tarjeta-head">
+        <h2 id="accesosTitulo">Accesos rápidos</h2>
+      </div>
+      <div class="accesos">
+        <a class="btn btn-oro" href="/admin/productos?nuevo=1">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>Nuevo producto
+        </a>
+        <a class="btn btn-line" href="/admin/recordatorios?nuevo=1">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>Nuevo recordatorio
+        </a>
+        <a class="btn btn-ghost" href="/" target="_blank" rel="noopener">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M14 4h6v6"/><path d="M20 4 11 13"/><path d="M18 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h5"/></svg>Ver el sitio público<span class="sr-only"> (abre en otra pestaña)</span>
+        </a>
+      </div>
+    </section>
+  </div>
+
+  <script>
+    import { supabase } from '../../lib/supabase.js';
+    import { esc, haceCuanto, mensajeError, toast } from '../../lib/admin.js';
+
+    // El saludo se calcula en el navegador: el servidor puede estar en otra zona horaria.
+    const hora = new Date().getHours();
+    document.getElementById('saludo')!.textContent = hora < 12 ? 'Buenos días' : hora < 19 ? 'Buenas tardes' : 'Buenas noches';
+
+    type Fila = { id: string; nombre: string; imagen_url: string | null; activo: boolean; actualizado_en: string };
+    const campos = 'id, nombre, imagen_url, activo, actualizado_en';
+
+    // Dos consultas traen todo lo que necesita el inicio (los catálogos son
+    // pequeños): contar en el navegador evita cuatro viajes al servidor.
+    const [prod, recs] = await Promise.all([
+      supabase.from('productos').select(campos),
+      supabase.from('recordatorios').select(campos),
+    ]);
+    const lista = document.getElementById('recientes')!;
+
+    if (prod.error || recs.error) {
+      toast(mensajeError(prod.error ?? recs.error), 'error');
+      lista.innerHTML = '<li class="vacio"><p>No se pudieron cargar los datos. Recarga la página.</p></li>';
+    } else {
+      const productos = (prod.data ?? []) as Fila[];
+      const recordatorios = (recs.data ?? []) as Fila[];
+      const fijar = (id: string, n: number) => { document.getElementById(id)!.textContent = String(n); };
+      fijar('nVisibles', productos.filter((p) => p.activo).length);
+      fijar('nOcultos', productos.filter((p) => !p.activo).length);
+      fijar('nRecs', recordatorios.filter((r) => r.activo).length);
+      const sinFoto = productos.filter((p) => !p.imagen_url).length + recordatorios.filter((r) => !r.imagen_url).length;
+      fijar('nSinFoto', sinFoto);
+      document.getElementById('statSinFoto')!.classList.toggle('alerta', sinFoto > 0);
+      document.getElementById('stats')!.removeAttribute('aria-busy');
+
+      const recientes = [
+        ...productos.map((p) => ({ ...p, tipo: 'Producto', href: '/admin/productos' })),
+        ...recordatorios.map((r) => ({ ...r, tipo: 'Recordatorio', href: '/admin/recordatorios' })),
+      ].sort((a, b) => b.actualizado_en.localeCompare(a.actualizado_en)).slice(0, 6);
+
+      lista.innerHTML = recientes.length ? recientes.map((x) => `
+        <li><a href="${x.href}?buscar=${encodeURIComponent(x.nombre)}">
+          <img src="${esc(x.imagen_url || '/img/logo-badge.png')}" alt="" width="44" height="55" loading="lazy">
+          <span><b>${esc(x.nombre)}</b><small>${x.tipo}${x.activo ? '' : ' · oculto'}</small></span>
+          <time datetime="${esc(x.actualizado_en)}">${haceCuanto(x.actualizado_en)}</time>
+        </a></li>`).join('')
+        : '<li class="vacio"><p>Aún no hay piezas en el catálogo.</p></li>';
+    }
+  </script>
+</AdminLayout>

@@ -1,0 +1,415 @@
+---
+import AdminLayout from '../../layouts/AdminLayout.astro';
+---
+<AdminLayout title="Productos" current="productos">
+  <div class="page-head">
+    <div>
+      <span class="eyebrow">Catálogo</span>
+      <h1>Productos</h1>
+      <p>Haz clic en cualquier texto o precio para editarlo ahí mismo: Enter guarda y Escape cancela. La foto se cambia tocándola.</p>
+    </div>
+    <button class="btn btn-oro" id="btnNuevo" type="button" aria-expanded="false" aria-controls="panelAlta">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>Nuevo producto
+    </button>
+  </div>
+
+  <section class="tarjeta tarjeta-pad panel-alta" id="panelAlta" aria-labelledby="altaTitulo" hidden>
+    <div class="tarjeta-head"><h2 id="altaTitulo">Nuevo producto</h2></div>
+    <form class="form-alta" id="formAlta" novalidate>
+      <div class="field c6">
+        <label for="n-nombre">Nombre</label>
+        <input id="n-nombre" maxlength="120" required placeholder="Ej: Bouquet Colorido" aria-describedby="n-nombre-error">
+        <p class="msg-error" id="n-nombre-error" hidden></p>
+      </div>
+      <div class="field c3">
+        <label for="n-linea">Línea</label>
+        <select id="n-linea" required aria-describedby="n-linea-error"></select>
+        <p class="msg-error" id="n-linea-error" hidden></p>
+      </div>
+      <div class="field c3">
+        <label for="n-precio">Precio en pesos</label>
+        <input id="n-precio" inputmode="numeric" required placeholder="Ej: 80000" aria-describedby="n-precio-error">
+        <p class="msg-error" id="n-precio-error" hidden></p>
+      </div>
+      <div class="field c6">
+        <label for="n-materiales">Materiales</label>
+        <textarea id="n-materiales" maxlength="500" required placeholder="Ej: Flores en cera de soja con fragancia · Vasija en yeso" aria-describedby="n-materiales-error"></textarea>
+        <p class="msg-error" id="n-materiales-error" hidden></p>
+      </div>
+      <div class="field c3">
+        <label for="n-nota">Nota <span class="ayuda">(opcional)</span></label>
+        <input id="n-nota" maxlength="200" placeholder="Ej: Sin cera $35.000">
+      </div>
+      <div class="field c3">
+        <span class="field-label" id="n-foto-label">Foto <span class="ayuda">(opcional)</span></span>
+        <label class="zona-foto" id="zonaFoto" aria-labelledby="n-foto-label">
+          <span class="marco-foto">
+            <img alt="Vista previa">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="5" width="18" height="14" rx="2"/><circle cx="9" cy="10" r="2"/><path d="m21 16-5-5-8 8"/></svg>
+          </span>
+          <span><span data-texto>Elegir o arrastrar foto</span><small>Se optimiza sola antes de subir</small></span>
+          <input type="file" accept="image/*">
+        </label>
+      </div>
+      <div class="form-alta-pie">
+        <p>El producto se publica visible. Puedes ocultarlo luego con el interruptor.</p>
+        <button class="btn btn-ghost" type="button" id="btnCancelar">Cancelar</button>
+        <button class="btn btn-oro" type="submit" id="btnGuardar">Guardar producto</button>
+      </div>
+    </form>
+  </section>
+
+  <div class="filtros" role="search">
+    <div class="buscador">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3"/></svg>
+      <label class="sr-only" for="buscar">Buscar producto</label>
+      <input class="control" id="buscar" type="search" placeholder="Buscar por nombre o material" autocomplete="off">
+    </div>
+    <label class="sr-only" for="filtroLinea">Línea</label>
+    <select class="control" id="filtroLinea"><option value="">Todas las líneas</option></select>
+    <label class="sr-only" for="filtroEstado">Mostrar</label>
+    <select class="control" id="filtroEstado">
+      <option value="">Todos</option>
+      <option value="visibles">Solo visibles</option>
+      <option value="ocultos">Solo ocultos</option>
+      <option value="sin-foto">Sin foto</option>
+    </select>
+    <p class="conteo" id="conteo" aria-live="polite"></p>
+  </div>
+
+  <div class="tarjeta tabla-marco">
+    <table class="tabla">
+      <caption class="sr-only">Productos del catálogo</caption>
+      <thead>
+        <tr>
+          <th scope="col" class="c-foto">Foto</th>
+          <th scope="col">Producto</th>
+          <th scope="col">Línea</th>
+          <th scope="col" class="num">Precio</th>
+          <th scope="col">Nota</th>
+          <th scope="col" class="c-visible">En el sitio</th>
+          <th scope="col" class="c-acciones"><span class="sr-only">Acciones</span></th>
+        </tr>
+      </thead>
+      <tbody id="tbody">
+        <tr class="fila-estado"><td colspan="7"><div class="esqueleto"></div></td></tr>
+        <tr class="fila-estado"><td colspan="7"><div class="esqueleto"></div></td></tr>
+        <tr class="fila-estado"><td colspan="7"><div class="esqueleto"></div></td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <script>
+    import { supabase, cop } from '../../lib/supabase.js';
+    import {
+      esc, toast, mensajeError, confirmar, actualizar, eliminar, insertar,
+      subirFoto, borrarFoto, elegirArchivo, selectorDeFoto, editarEnLinea,
+      texto, opcional, leerPrecio, errorDeCampo,
+    } from '../../lib/admin.js';
+
+    type Linea = { id: string; nombre: string };
+    type Producto = {
+      id: string; nombre: string; materiales: string; precio: number; nota: string | null;
+      imagen_url: string | null; activo: boolean; linea_id: string; orden: number;
+    };
+
+    const $ = <T extends HTMLElement = HTMLElement>(id: string) => document.getElementById(id) as T;
+    const tbody = $('tbody');
+    const conteo = $('conteo');
+    const buscar = $<HTMLInputElement>('buscar');
+    const filtroLinea = $<HTMLSelectElement>('filtroLinea');
+    const filtroEstado = $<HTMLSelectElement>('filtroEstado');
+
+    let lineas: Linea[] = [];
+    let productos: Producto[] = [];
+    const porId = (id: string) => productos.find((p) => p.id === id);
+
+    // Los filtros se leen de la URL: así el Inicio puede enlazar directo a
+    // "productos ocultos" o "sin foto", y recargar no los pierde.
+    const params = new URLSearchParams(location.search);
+    buscar.value = params.get('buscar') ?? '';
+    filtroEstado.value = params.get('estado') ?? '';
+
+    const ICONO_FOTO = '<svg viewBox="0 0 24 24"><path d="M4 8h3l2-3h6l2 3h3v11H4z"/><circle cx="12" cy="13" r="3.5"/></svg>';
+    const ICONO_BORRAR = '<svg viewBox="0 0 24 24"><path d="M3 6h18M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2m3 0-1 14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2L4 6"/></svg>';
+
+    // ------------------------------------------------------------ carga ---
+    async function cargar() {
+      const [l, p] = await Promise.all([
+        supabase.from('lineas').select('id, nombre').order('orden'),
+        supabase.from('productos')
+          .select('id, nombre, materiales, precio, nota, imagen_url, activo, linea_id, orden')
+          .order('orden', { ascending: true }),
+      ]);
+      if (l.error || p.error) {
+        tbody.innerHTML = `<tr class="fila-estado"><td colspan="7"><div class="vacio">
+          <b>No se pudo cargar el catálogo</b><p>${esc(mensajeError(l.error ?? p.error))}</p>
+          <button class="btn btn-line" type="button" id="reintentar">Reintentar</button></div></td></tr>`;
+        $('reintentar').addEventListener('click', cargar);
+        return;
+      }
+      lineas = l.data ?? [];
+      productos = (p.data ?? []) as Producto[];
+      const opts = lineas.map((x) => `<option value="${esc(x.id)}">${esc(x.nombre)}</option>`).join('');
+      $('n-linea').innerHTML = opts;
+      filtroLinea.innerHTML = '<option value="">Todas las líneas</option>' + opts;
+      filtroLinea.value = params.get('linea') ?? '';
+      render();
+      if (params.get('nuevo') === '1') abrirAlta(true);
+    }
+
+    // ------------------------------------------------------------ tabla ---
+    function visibles() {
+      const q = buscar.value.trim().toLowerCase();
+      const linea = filtroLinea.value;
+      const estado = filtroEstado.value;
+      return productos.filter((p) =>
+        (!linea || p.linea_id === linea) &&
+        (estado !== 'visibles' || p.activo) &&
+        (estado !== 'ocultos' || !p.activo) &&
+        (estado !== 'sin-foto' || !p.imagen_url) &&
+        (!q || p.nombre.toLowerCase().includes(q) || p.materiales.toLowerCase().includes(q))
+      );
+    }
+
+    function filaHTML(p: Producto) {
+      const n = esc(p.nombre);
+      return `
+      <tr data-id="${esc(p.id)}" class="${p.activo ? '' : 'oculto'}">
+        <td class="c-foto">
+          <button type="button" class="foto-btn js-foto ${p.imagen_url ? '' : 'sin-foto'}" aria-label="Cambiar la foto de ${n}">
+            <img src="${esc(p.imagen_url || '/img/logo-badge.png')}" alt="" width="56" height="70" loading="lazy" decoding="async">
+            <span class="foto-ico" aria-hidden="true">${ICONO_FOTO}</span>
+          </button>
+        </td>
+        <td class="c-principal">
+          <span class="editable e-nombre" data-campo="nombre" aria-label="Nombre"></span>
+          <span class="editable e-sub" data-campo="materiales" data-multilinea data-vacio="Añadir materiales" aria-label="Materiales de ${n}"></span>
+        </td>
+        <td data-label="Línea">
+          <select class="select-linea js-linea" aria-label="Línea de ${n}">
+            ${lineas.map((l) => `<option value="${esc(l.id)}" ${l.id === p.linea_id ? 'selected' : ''}>${esc(l.nombre)}</option>`).join('')}
+          </select>
+        </td>
+        <td class="num" data-label="Precio"><span class="editable e-precio" data-campo="precio" inputmode="numeric" aria-label="Precio de ${n}"></span></td>
+        <td data-label="Nota"><span class="editable e-nota" data-campo="nota" data-vacio="Añadir nota" aria-label="Nota de ${n}"></span></td>
+        <td data-label="En el sitio">
+          <label class="visible-ctrl">
+            <span class="switch"><input type="checkbox" class="js-activo" ${p.activo ? 'checked' : ''}><span class="track"></span><span class="thumb"></span></span>
+            <span class="estado">${p.activo ? 'Visible' : 'Oculto'}</span>
+            <span class="sr-only"> en el sitio: ${n}</span>
+          </label>
+        </td>
+        <td class="c-acciones">
+          <button type="button" class="btn-icon peligro js-eliminar" aria-label="Eliminar ${n}">${ICONO_BORRAR}</button>
+        </td>
+      </tr>`;
+    }
+
+    function render() {
+      const lista = visibles();
+      conteo.textContent = lista.length === productos.length
+        ? `${productos.length} productos`
+        : `${lista.length} de ${productos.length} productos`;
+
+      if (!lista.length) {
+        const hayFiltro = buscar.value || filtroLinea.value || filtroEstado.value;
+        tbody.innerHTML = `<tr class="fila-estado"><td colspan="7"><div class="vacio">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3"/></svg>
+          <b>${hayFiltro ? 'Nada coincide con esos filtros' : 'Aún no hay productos'}</b>
+          <p>${hayFiltro ? 'Prueba con otra palabra o quita los filtros.' : 'Crea el primero con el botón “Nuevo producto”.'}</p>
+          ${hayFiltro ? '<button class="btn btn-line" type="button" id="limpiar">Quitar filtros</button>' : ''}
+        </div></td></tr>`;
+        document.getElementById('limpiar')?.addEventListener('click', () => {
+          buscar.value = ''; filtroLinea.value = ''; filtroEstado.value = '';
+          sincronizarURL(); render();
+        });
+        return;
+      }
+      tbody.innerHTML = lista.map(filaHTML).join('');
+      tbody.querySelectorAll<HTMLTableRowElement>('tr[data-id]').forEach(conectarFila);
+    }
+
+    function conectarFila(tr: HTMLTableRowElement) {
+      const p = porId(tr.dataset.id!)!;
+      const campo = (c: string) => tr.querySelector<HTMLElement>(`[data-campo="${c}"]`)!;
+      const guardar = async (cambios: Partial<Producto>) => {
+        await actualizar('productos', p.id, cambios);
+        Object.assign(p, cambios);
+      };
+
+      editarEnLinea(campo('nombre'), {
+        valor: p.nombre, leer: texto('El nombre', 120),
+        guardar: (v: string) => guardar({ nombre: v }),
+      });
+      editarEnLinea(campo('materiales'), {
+        valor: p.materiales, leer: texto('Los materiales', 500),
+        guardar: (v: string) => guardar({ materiales: v }),
+      });
+      editarEnLinea(campo('precio'), {
+        valor: p.precio, mostrar: cop, editar: (v: number) => String(v), leer: leerPrecio,
+        guardar: (v: number) => guardar({ precio: v }),
+      });
+      editarEnLinea(campo('nota'), {
+        valor: p.nota, leer: opcional(200),
+        guardar: (v: string | null) => guardar({ nota: v }),
+      });
+
+      const selLinea = tr.querySelector<HTMLSelectElement>('.js-linea')!;
+      selLinea.addEventListener('change', async () => {
+        const anterior = p.linea_id;
+        selLinea.disabled = true;
+        try {
+          await guardar({ linea_id: selLinea.value });   // actualiza también el dato local del filtro
+          toast('Línea actualizada');
+        } catch (err) {
+          selLinea.value = anterior;
+          toast(mensajeError(err), 'error');
+        } finally { selLinea.disabled = false; }
+      });
+
+      const chk = tr.querySelector<HTMLInputElement>('.js-activo')!;
+      const estado = tr.querySelector('.estado')!;
+      chk.addEventListener('change', async () => {
+        const activo = chk.checked;
+        chk.disabled = true;
+        try {
+          await guardar({ activo });
+          tr.classList.toggle('oculto', !activo);
+          estado.textContent = activo ? 'Visible' : 'Oculto';
+          toast(activo ? `“${p.nombre}” ya se ve en el sitio` : `“${p.nombre}” quedó oculto del sitio`);
+        } catch (err) {
+          chk.checked = !activo;
+          toast(mensajeError(err), 'error');
+        } finally { chk.disabled = false; }
+      });
+
+      const btnFoto = tr.querySelector<HTMLButtonElement>('.js-foto')!;
+      btnFoto.addEventListener('click', async () => {
+        const archivo = await elegirArchivo();
+        if (!archivo) return;
+        btnFoto.setAttribute('aria-busy', 'true');
+        const vieja = p.imagen_url;
+        try {
+          const url = await subirFoto('productos', archivo);
+          try { await guardar({ imagen_url: url }); }
+          catch (err) { borrarFoto(url); throw err; }
+          btnFoto.querySelector('img')!.src = url;
+          btnFoto.classList.remove('sin-foto');
+          toast('Foto actualizada');
+          borrarFoto(vieja);   // la anterior ya no la usa nadie
+        } catch (err) {
+          toast(mensajeError(err), 'error');
+        } finally { btnFoto.removeAttribute('aria-busy'); }
+      });
+
+      tr.querySelector('.js-eliminar')!.addEventListener('click', async () => {
+        const ok = await confirmar({
+          titulo: `¿Eliminar “${p.nombre}”?`,
+          mensaje: 'Desaparece del catálogo y del sitio para siempre. Si solo quieres dejar de mostrarlo, usa el interruptor “Visible”.',
+        });
+        if (!ok) return;
+        try {
+          await eliminar('productos', p.id);
+          productos = productos.filter((x) => x.id !== p.id);
+          render();
+          toast('Producto eliminado');
+          borrarFoto(p.imagen_url);
+        } catch (err) { toast(mensajeError(err), 'error'); }
+      });
+    }
+
+    // ---------------------------------------------------------- filtros ---
+    function sincronizarURL() {
+      const u = new URL(location.href);
+      for (const [k, v] of [['buscar', buscar.value.trim()], ['linea', filtroLinea.value], ['estado', filtroEstado.value]]) {
+        if (v) u.searchParams.set(k, v); else u.searchParams.delete(k);
+      }
+      u.searchParams.delete('nuevo');
+      history.replaceState(null, '', u);
+    }
+    let espera: ReturnType<typeof setTimeout>;
+    buscar.addEventListener('input', () => { clearTimeout(espera); espera = setTimeout(() => { sincronizarURL(); render(); }, 150); });
+    filtroLinea.addEventListener('change', () => { sincronizarURL(); render(); });
+    filtroEstado.addEventListener('change', () => { sincronizarURL(); render(); });
+
+    // ------------------------------------------------------ alta nueva ---
+    const panel = $('panelAlta');
+    const form = $<HTMLFormElement>('formAlta');
+    const btnNuevo = $<HTMLButtonElement>('btnNuevo');
+    const btnGuardar = $<HTMLButtonElement>('btnGuardar');
+    const foto = selectorDeFoto($('zonaFoto'));
+    const nNombre = $<HTMLInputElement>('n-nombre');
+    const nLinea = $<HTMLSelectElement>('n-linea');
+    const nPrecio = $<HTMLInputElement>('n-precio');
+    const nMateriales = $<HTMLTextAreaElement>('n-materiales');
+    const nNota = $<HTMLInputElement>('n-nota');
+
+    function abrirAlta(abrir: boolean) {
+      panel.hidden = !abrir;
+      btnNuevo.setAttribute('aria-expanded', String(abrir));
+      if (abrir) { panel.scrollIntoView({ behavior: 'smooth', block: 'start' }); nNombre.focus({ preventScroll: true }); }
+      else {
+        form.reset(); foto.limpiar();
+        [nNombre, nLinea, nPrecio, nMateriales].forEach((i) => errorDeCampo(i, ''));
+      }
+    }
+    btnNuevo.addEventListener('click', () => abrirAlta(panel.hidden));
+    $('btnCancelar').addEventListener('click', () => { abrirAlta(false); btnNuevo.focus(); });
+
+    function validar() {
+      let precio = 0;
+      const errores: [HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement, string][] = [
+        [nNombre, nNombre.value.trim() ? '' : 'Escribe el nombre del producto.'],
+        [nLinea, nLinea.value ? '' : 'Elige una línea.'],
+        [nPrecio, !nPrecio.value.trim() ? 'Escribe el precio.' : (() => { try { precio = leerPrecio(nPrecio.value); return precio > 0 ? '' : 'El precio debe ser mayor que cero.'; } catch (e) { return (e as Error).message; } })()],
+        [nMateriales, nMateriales.value.trim() ? '' : 'Describe los materiales (se muestran en el sitio).'],
+      ];
+      // Se marcan todos los campos con error a la vez; el foco va al primero.
+      const fallidos = errores.filter(([i, m]) => !errorDeCampo(i, m));
+      fallidos[0]?.[0].focus();
+      return fallidos.length ? null : precio;
+    }
+
+    form.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const precio = validar();
+      if (precio === null) return;
+
+      btnGuardar.disabled = true;
+      btnGuardar.setAttribute('aria-busy', 'true');
+      let url: string | null = null;
+      try {
+        const archivo = foto.archivo();
+        if (archivo) url = await subirFoto('productos', archivo);
+        const nuevo = await insertar('productos', {
+          nombre: nNombre.value.trim(),
+          linea_id: nLinea.value,
+          precio,
+          materiales: nMateriales.value.trim(),
+          nota: nNota.value.trim() || null,
+          imagen_url: url,
+          // al final del catálogo, aunque se hayan borrado productos antes
+          orden: productos.reduce((m, p) => Math.max(m, p.orden), -1) + 1,
+          activo: true,
+        }) as Producto;
+        productos.push(nuevo);
+        abrirAlta(false);
+        buscar.value = ''; filtroLinea.value = ''; filtroEstado.value = '';
+        sincronizarURL(); render();
+        const fila = tbody.querySelector<HTMLElement>(`tr[data-id="${CSS.escape(nuevo.id)}"]`);
+        fila?.classList.add('recien');
+        fila?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        toast(`“${nuevo.nombre}” agregado al catálogo`);
+      } catch (err) {
+        if (url) borrarFoto(url);   // no dejar la foto huérfana si el alta falló
+        toast(mensajeError(err), 'error');
+      } finally {
+        btnGuardar.disabled = false;
+        btnGuardar.removeAttribute('aria-busy');
+      }
+    });
+
+    await cargar();
+  </script>
+</AdminLayout>

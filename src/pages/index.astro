@@ -1,0 +1,930 @@
+---
+import { Image } from 'astro:assets';
+import { supabase, cop, copPlain } from '../lib/supabase.js';
+import '../styles/site.css';
+
+// Recortes sin fondo (ya sin margen: ver scripts/recortar-flota.mjs).
+// Pasan por <Image>, que los sirve en WebP a 1x y 2x del tamaño en pantalla.
+const recortes = import.meta.glob<ImageMetadata>('../assets/flota/*.png', { eager: true, import: 'default' });
+const recorte = (n: number) => recortes[`../assets/flota/${n}.png`];
+
+const { data: productosRaw, error: productosError } = await supabase
+  .from('productos')
+  .select('id, nombre, materiales, precio, nota, imagen_url, orden, lineas(slug)')
+  .eq('activo', true)
+  .order('orden', { ascending: true });
+
+if (productosError) console.error('[Supabase] productos:', productosError.message);
+
+// Sin tipos generados, supabase-js supone que toda relación es un arreglo;
+// productos → lineas es muchos-a-uno y llega como un solo objeto.
+const productos = (productosRaw ?? []).map((p) => ({
+  id: p.id,
+  n: p.nombre,
+  line: (p.lineas as unknown as { slug: string } | null)?.slug ?? 'recipientes',
+  mat: p.materiales,
+  p: cop(p.precio),
+  note: p.nota || undefined,
+  img: p.imagen_url || '/img/logo-badge.png',
+}));
+
+const { data: recordatoriosRaw, error: recordatoriosError } = await supabase
+  .from('recordatorios')
+  .select('id, nombre, descripcion, nota, imagen_url, orden, recordatorio_opciones(descripcion, precio_unidad, precio_mayor, orden)')
+  .eq('activo', true)
+  .order('orden', { ascending: true });
+
+if (recordatoriosError) console.error('[Supabase] recordatorios:', recordatoriosError.message);
+
+const recs = (recordatoriosRaw ?? []).map((r) => ({
+  id: r.id,
+  n: r.nombre,
+  d: r.descripcion,
+  note: r.nota || undefined,
+  img: r.imagen_url || '/img/logo-badge.png',
+  rows: (r.recordatorio_opciones ?? [])
+    .slice()
+    .sort((a, b) => a.orden - b.orden)
+    .map((o) => [o.descripcion, copPlain(o.precio_unidad), copPlain(o.precio_mayor)]),
+}));
+
+const siteData = { productos, recs };
+
+// Tres piezas insignia para los pedestales de la Colección Destacada.
+// Se eligen por nombre; si la dueña las renombra o desactiva en /admin,
+// el hueco se rellena con las primeras del catálogo que tengan recorte.
+// Las fotos se sirven desde Supabase Storage, otro origen: preconectar ahorra
+// el DNS + TCP + TLS (unos 760 ms en 4G) antes de la primera imagen.
+const origenFotos = (() => {
+  try { return new URL(import.meta.env.PUBLIC_SUPABASE_URL).origin; } catch { return null; }
+})();
+
+// En los pedestales solo entran piezas con recorte sin fondo: una foto con
+// mesa y pared detrás no puede levitar. Terraza Inmortal no tiene recorte,
+// así que su lugar lo toma Esencia del Desierto (misma línea botánica).
+const recortePorProducto: Record<string, number> = {
+  'Esencia Acanalada': 1,
+  'Abrazo Aromático': 2,
+  'Set Armonía': 3,
+  'Idilio Felino': 7,
+  'Bouquet Colorido': 8,
+  'Esencia del Desierto': 9,
+  'Loto de Devoción': 10,
+  'Nido de Oro': 13,
+};
+const conRecorte = productos
+  .filter((p) => recortePorProducto[p.n])
+  .map((p) => ({ ...p, recorte: recorte(recortePorProducto[p.n]) }));
+const insignia = ['Abrazo Aromático', 'Bouquet Colorido', 'Esencia Acanalada'];
+const destacados = insignia
+  .map((n) => conRecorte.find((p) => p.n === n))
+  .filter((p): p is (typeof conRecorte)[number] => p !== undefined);
+for (const p of conRecorte) {
+  if (destacados.length >= 3) break;
+  if (!destacados.includes(p)) destacados.push(p);
+}
+
+// ===================== IMÁGENES DEL HERO (GRAVEDAD CERO) =====================
+// Aquí se eligen las piezas que flotan en el hero. `n` es el número del PNG
+// en src/assets/flota/ (1.png … 13.png): cambia ese número para cambiar la
+// imagen. Borra una línea para quitar una pieza; muévela de lista para
+// cambiarla de capa. Máximo 14 en total (presupuesto de rendimiento).
+//   x / y   → posición en escritorio, en % del hero (0 = izquierda / arriba)
+//   xm / ym → posición en móvil (si faltan, usa x / y)
+//   s       → ancho: clamp(mínimo, según pantalla, máximo)
+//   r       → inclinación en grados
+//   f       → ritmo de levitación (1–14); no repitas números
+//   sc      → escala extra opcional (solo frente). En móvil manda el .66 del CSS.
+//   tier: 'b' → se oculta en móvil (en móvil quedan máximo 6 visibles)
+// Todas las piezas van desenfocadas y por detrás del titular (site.css:
+// .capa-fondo/.capa-frente, z-index 1 y 5 contra el 10 del texto): ninguna
+// compite en nitidez ni en plano con la lectura — son atmósfera, no recorte.
+// El titular mide como mucho 1000px y va centrado (site.css: .hero .titular),
+// así que su borde real está a "50% ± 500px" del centro del hero, no a un %
+// fijo del ancho: un x en % se acerca o se aleja del texto según el monitor
+// sea angosto o ultra-wide. Las piezas que deben quedar en el margen, fuera
+// de la columna de texto, usan calc() anclado a ese centro en vez de %; así
+// se despegan del titular en vez de superponerse cuando la pantalla achica.
+// `pos()` deja pasar ese calc() tal cual y solo añade "%" a los números.
+const pos = (v: number | string) => (typeof v === 'number' ? `${v}%` : v);
+
+// Fondo = pequeñas, desenfocadas, parallax 0.3×.
+const campoFondo = [
+  { n: 2,  x: 3,  y: 18,  s: 'clamp(84px, 11vw, 170px)',  r: -5, f: 1,  xm: 2,  ym: 1 },
+  { n: 8,  x: 84, y: 24,  s: 'clamp(92px, 12vw, 190px)',  r: 6,  f: 3,  xm: 72, ym: 2 },
+  { n: 6,  x: 68, y: 3,  s: 'clamp(56px, 6vw, 96px)',   r: 8,  f: 5,  xm: 56, ym: 6 },
+  { n: 4,  x: 2,  y: 44, s: 'clamp(64px, 7vw, 110px)',  r: 5,  f: 12, tier: 'b' },
+  { n: 12, x: 30, y: 84, s: 'clamp(52px, 5.5vw, 90px)', r: 7,  f: 6,  tier: 'b' },
+  { n: 11, x: 62, y: 86, s: 'clamp(56px, 6vw, 96px)',   r: -8, f: 13, tier: 'b' },
+];
+// Frente = el plano más cercano, algo menos desenfocado que el fondo (nunca
+// nítido), parallax 1.15×.
+const campoFrente = [
+  { n: 3,  x: 5,  y: 74, s: 'clamp(100px, 15vw, 180px)', r: 3,  f: 4,  xm: -2, ym: 84 },
+  { n: 10, x: 82, y: 88, s: 'clamp(48px, 5vw, 80px)',    r: 7,  f: 7, ym: 84 },
+  // n1 y n5 flanquean el titular por fuera de su columna de 1000px (arriba-
+  // izquierda y a la altura de "en recuerdos"). Si el hero es angosto y no
+  // hay margen real, calc() las saca de pantalla en vez de amontonarlas
+  // detrás del texto.
+  { n: 5, x: 'calc(50% + 520px)', y: 55, s: 'clamp(70px, 8vw, 130px)', r: -6, f: 10, tier: 'b' },
+];
+// =============================================================================
+
+// Ancho máximo en px de cada `s`: es el 1x que se le pide al optimizador.
+// Si `s` no termina en "…px)", se pide 300px, que cubre cualquier pieza.
+const anchoMax = (s: string) => parseInt(s.match(/(\d+)px\)$/)?.[1] ?? '300', 10);
+---
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Yeska Essence — Velas artesanales</title>
+  <meta name="description" content="Velas artesanales en cera de soja y yeso, hechas a mano en Colombia. Catálogo, recordatorios para eventos y pedidos por WhatsApp.">
+  <!-- Fuentes propias (ver @font-face en site.css). Se precargan las dos caras
+       del primer pintado; la italica y la script entran despues sin bloquear. -->
+  <link rel="preload" as="font" type="font/woff2" href="/fonts/fraunces-latin.woff2" crossorigin>
+  <link rel="preload" as="font" type="font/woff2" href="/fonts/karla-latin.woff2" crossorigin>
+  {origenFotos && <link rel="preconnect" href={origenFotos} crossorigin />}
+  <script is:inline>document.documentElement.classList.add('js');</script>
+</head>
+<body>
+
+<div class="preload" id="preload" aria-hidden="true">
+  <div class="stage">
+    <div class="ring">
+      <svg viewBox="0 0 150 150"><defs><linearGradient id="goldstroke" x1="0" x2="1"><stop offset="0" stop-color="#8C6318"/><stop offset=".5" stop-color="#E9CF7A"/><stop offset="1" stop-color="#8C6318"/></linearGradient></defs><circle class="track" cx="75" cy="75" r="70"/><circle class="bar" cx="75" cy="75" r="70"/></svg>
+      <img src="img/logo-badge.png" alt="">
+    </div>
+    <div class="word" id="preWord">Yeska Essence</div>
+    <div class="tag">Iluminando momentos</div>
+    <div class="line"></div>
+  </div>
+</div>
+
+<!-- Atmósfera fija: viñeta en las esquinas y luz alta (§2.1). El polvo dorado
+     vive aparte, en su propio canvas: necesita un z-index por encima de los
+     fondos opacos de las secciones Lienzo, y .ambiente vive en -1 a propósito. -->
+<div class="ambiente" aria-hidden="true"><i class="vineta"></i><i class="luz"></i></div>
+<canvas id="embers" class="polvo-canvas" aria-hidden="true"></canvas>
+
+<header class="nav" id="nav">
+  <div class="wrap">
+    <!-- Escritorio: dos enlaces a cada lado de la marca (grid 1fr auto 1fr) -->
+    <nav class="nav-izq" aria-label="Secciones">
+      <ul class="nav-links">
+        <li><a href="#coleccion">Colección</a></li>
+        <li><a href="#esencia">Nuestra Historia</a></li>
+      </ul>
+    </nav>
+    <a class="brand" href="#top" aria-label="Yeska Essence, inicio">
+      <span class="brand-word">Yeska</span>
+      <img src="img/logo-badge.png" alt="" width="480" height="502">
+      <span class="brand-word">Essence</span>
+    </a>
+    <div class="nav-right">
+      <nav aria-label="Más secciones">
+        <ul class="nav-links">
+          <li><a href="#proceso">Proceso</a></li>
+          <li><a href="#contacto">Contacto</a></li>
+        </ul>
+      </nav>
+      <button class="menu-btn" id="menuBtn" type="button" aria-label="Abrir menú" aria-expanded="false" aria-controls="menu"><i></i><i></i><i></i></button>
+    </div>
+  </div>
+</header>
+
+<div class="menu" id="menu" role="dialog" aria-modal="true" aria-label="Menú" inert>
+  <!-- Marca de agua decorativa: no recibe foco ni clics -->
+  <Image class="menu-agua" src={recorte(13)} alt="" aria-hidden="true" widths={[320, 640, 960]} sizes="45vw" format="webp" quality={60} loading="lazy" decoding="async" />
+  <nav aria-label="Navegación principal">
+    <ol>
+      <li><a href="#top" data-close>Inicio</a></li>
+      <li><a href="#esencia" data-close>Nuestra Esencia</a></li>
+      <li><a href="#coleccion" data-close>Colección</a></li>
+      <li><a href="#recordatorios" data-close>Recordatorios</a></li>
+      <li><a href="#proceso" data-close>Proceso</a></li>
+      <li><a href="#contacto" data-close>Contacto</a></li>
+    </ol>
+  </nav>
+  <div class="menu-pie">
+    <a href="https://www.instagram.com/Yeska_Essence" target="_blank" rel="noopener" aria-label="Instagram de Yeska Essence">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="5"/><circle cx="12" cy="12" r="4"/><circle cx="17.5" cy="6.5" r="1" fill="currentColor" stroke="none"/></svg>
+    </a>
+    <a href="https://wa.me/573214034007" target="_blank" rel="noopener" aria-label="WhatsApp 321 403 4007">
+      <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 2a10 10 0 0 0-8.6 15.1L2 22l5.1-1.3A10 10 0 1 0 12 2Zm0 18.2a8.2 8.2 0 0 1-4.2-1.2l-.3-.2-3 .8.8-2.9-.2-.3A8.2 8.2 0 1 1 12 20.2Zm4.5-6.1c-.2-.1-1.5-.7-1.7-.8s-.4-.1-.6.1-.6.8-.8 1-.3.2-.5.1a6.7 6.7 0 0 1-3.3-2.9c-.3-.4.3-.4.7-1.3.1-.2 0-.3 0-.4l-.8-1.8c-.2-.5-.4-.4-.6-.4h-.5a1 1 0 0 0-.7.3 3 3 0 0 0-.9 2.2 5.2 5.2 0 0 0 1.1 2.8 12 12 0 0 0 4.6 4c1.7.7 2.3.8 3.2.7a2.7 2.7 0 0 0 1.8-1.3 2.2 2.2 0 0 0 .2-1.3c-.1-.1-.3-.2-.5-.3Z"/></svg>
+    </a>
+  </div>
+</div>
+
+<a class="wa-float" href="https://wa.me/573214034007?text=Hola%20Yeska%20Essence%2C%20quiero%20hacer%20un%20pedido" target="_blank" rel="noopener" aria-label="Pedir por WhatsApp">
+  <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 2a10 10 0 0 0-8.6 15.1L2 22l5.1-1.3A10 10 0 1 0 12 2Zm0 18.2a8.2 8.2 0 0 1-4.2-1.2l-.3-.2-3 .8.8-2.9-.2-.3A8.2 8.2 0 1 1 12 20.2Zm4.5-6.1c-.2-.1-1.5-.7-1.7-.8s-.4-.1-.6.1-.6.8-.8 1-.3.2-.5.1a6.7 6.7 0 0 1-3.3-2.9c-.3-.4.3-.4.7-1.3.1-.2 0-.3 0-.4l-.8-1.8c-.2-.5-.4-.4-.6-.4h-.5a1 1 0 0 0-.7.3 3 3 0 0 0-.9 2.2 5.2 5.2 0 0 0 1.1 2.8 12 12 0 0 0 4.6 4c1.7.7 2.3.8 3.2.7a2.7 2.7 0 0 0 1.8-1.3 2.2 2.2 0 0 0 .2-1.3c-.1-.1-.3-.2-.5-.3Z"/></svg>
+  <span class="lbl">Pedir por WhatsApp</span>
+</a>
+
+<main id="top">
+
+  <!-- 2 · HERO MANIFIESTO (boceto 3) ---------------------------------- -->
+  <section class="hero amb-inmersivo" aria-labelledby="hero-title">
+    <!-- capa de fondo: piezas pequeñas, desenfocadas, parallax 0.3× -->
+    <div class="campo" aria-hidden="true">
+      {campoFondo.map((c) => (
+        <div class="par" data-par="0.3" data-tier={c.tier} style={`--x:${pos(c.x)}; --y:${pos(c.y)}; --xm:${pos(c.xm ?? c.x)}; --ym:${pos(c.ym ?? c.y)}; --s:${c.s}`}>
+          <Image class={`flota capa-fondo f${c.f}`} style={`--r:${c.r}deg; --sc:.7`} src={recorte(c.n)} alt="" width={anchoMax(c.s)} densities={[1, 2]} format="webp" quality={72} loading="eager" decoding="async" fetchpriority="low" />
+        </div>
+      ))}
+    </div>
+
+    <div class="wrap">
+      <div class="titular">
+        <h1 id="hero-title" class="display rise rise-2">Transformamos la luz en arte y el aroma <em class="gold">en recuerdos</em></h1>
+        <p class="micro pie rise rise-3">Hecho a mano, con intención</p>
+      </div>
+    </div>
+
+    <!-- capa de frente: piezas grandes y nítidas, parallax 1.15× -->
+    <div class="campo campo-frente" aria-hidden="true">
+      {campoFrente.map((c) => (
+        <div class="par" data-par="1.15" data-tier={c.tier} style={`--x:${pos(c.x)}; --y:${pos(c.y)}; --xm:${pos(c.xm ?? c.x)}; --ym:${pos(c.ym ?? c.y)}; --s:${c.s}`}>
+          <Image class={`flota capa-frente f${c.f}`} style={`--r:${c.r}deg; --sc:${c.sc ?? 1}`} src={recorte(c.n)} alt="" width={anchoMax(c.s)} densities={[1, 2]} format="webp" quality={75} loading="eager" decoding="async" fetchpriority="low" />
+        </div>
+      ))}
+    </div>
+  </section>
+
+  <!-- 3 · TICKER ------------------------------------------------------ -->
+  <div class="ticker" aria-hidden="true">
+    <div class="ticker-track" id="ticker">
+      <span>Cera de soja 100 %</span><span>Yeso artesanal</span><span>Fragancias premium</span><span>Hecho en Colombia</span><span>Precio al mayor para eventos</span><span>Personalización total</span>
+    </div>
+  </div>
+
+  <!-- 4 · NUESTRA ESENCIA (boceto 1) ---------------------------------- -->
+  <section id="esencia" class="section esencia amb-inmersivo" aria-labelledby="esencia-title">
+    <div class="wrap">
+      <div class="grid">
+        <div class="texto reveal">
+          <span class="eyebrow">Nuestra esencia</span>
+          <h2 id="esencia-title" class="display">Tres materiales, una pieza que <span class="gold">no se marchita</span></h2>
+          <p class="lead">No solo fabricamos velas: creamos experiencias sensoriales que se quedan en la casa mucho después de que la llama se apaga.</p>
+          <div class="pilares">
+            <div class="pilar">
+              <span class="n">01</span>
+              <div><h3>Bases de yeso hechas a mano</h3><p>Recipientes, bandejas y jarrones elaborados artesanalmente. El yeso permite acabados pulidos, minimalistas y elegantes que quedan como joya decorativa permanente en el hogar.</p></div>
+            </div>
+            <div class="pilar">
+              <span class="n">02</span>
+              <div><h3>Cera de soja 100 % natural</h3><p>Sostenible, biodegradable y de combustión limpia. Su punto de fusión más bajo garantiza mayor duración y una liberación de fragancia más intensa y pura.</p></div>
+            </div>
+            <div class="pilar">
+              <span class="n">03</span>
+              <div><h3>Esculturas en cera</h3><p>Desde peonías y rosas en tonos pastel hasta cactus exóticos, cada figura se esculpe para imitar la belleza de la naturaleza.</p></div>
+            </div>
+            <div class="pilar">
+              <span class="n">04</span>
+              <div><h3>Fragancias exquisitas</h3><p>Aromas premium que evocan frescura, serenidad y elegancia, diseñados para perdurar y crear ambientes acogedores.</p></div>
+            </div>
+          </div>
+        </div>
+        <figure class="arco reveal">
+          <img src="img/centro-de-mesa.jpg" width="900" height="1125" alt="Centro de mesa: vasija acanalada de yeso con flores en cera de soja y lazo rosa" loading="lazy" decoding="async">
+          <span class="filete" aria-hidden="true"></span>
+        </figure>
+      </div>
+    </div>
+  </section>
+
+  <!-- 5 · COLECCIÓN DESTACADA (boceto 2) ------------------------------ -->
+  <section class="section destacada amb-inmersivo" aria-labelledby="destacada-title">
+    <div class="wrap">
+      <div class="marco-fino">
+        <i class="petalo p1" aria-hidden="true"><svg viewBox="0 0 60 90"><path d="M30 0C46 20 50 46 30 90 10 46 14 20 30 0Z"/></svg></i>
+        <i class="petalo p2" aria-hidden="true"><svg viewBox="0 0 60 90"><path d="M30 0C46 20 50 46 30 90 10 46 14 20 30 0Z"/></svg></i>
+        <i class="petalo p3" aria-hidden="true"><svg viewBox="0 0 60 90"><path d="M30 0C46 20 50 46 30 90 10 46 14 20 30 0Z"/></svg></i>
+        <i class="chispa c1" aria-hidden="true"></i>
+        <i class="chispa c2" aria-hidden="true"></i>
+        <div class="section-head head-centro reveal">
+          <div>
+            <span class="eyebrow">Colección destacada</span>
+            <h2 id="destacada-title" class="display">Colección <span class="gold">Insignia</span></h2>
+            <p class="lead">Tres piezas favoritas, curadas con pasión.</p>
+          </div>
+        </div>
+        <div class="pedestales reveal">
+          {destacados.map((p) => (
+            <a class="pedestal" href={`#coleccion`} aria-label={`${p.n}, ${p.p} — ver en la colección`}>
+              <span class="marco">
+                <span class="marco-arco" aria-hidden="true"></span>
+                <span class="pieza">
+                  <Image src={p.recorte} alt={`${p.n}: ${p.mat}`} width={280} densities={[1, 2]} format="webp" quality={80} loading="lazy" decoding="async" />
+                </span>
+                <span class="sombra" aria-hidden="true"></span>
+              </span>
+              <span class="col">
+                <b>{p.n}</b>
+                <span class="precio-ped">{p.p}</span>
+              </span>
+            </a>
+          ))}
+        </div>
+        <p class="pie"><a class="enlace-oro" href="#coleccion">Ver la colección completa →</a></p>
+      </div>
+    </div>
+  </section>
+
+  <!-- 6 · transición malva → nude ------------------------------------- -->
+  <div class="transicion a-lienzo" aria-hidden="true">
+    <svg class="arco-svg" viewBox="0 0 1440 160" preserveAspectRatio="none"><path d="M0 160V96C240 20 480 0 720 0s480 20 720 96v64Z" fill="#F3E8E6"/></svg>
+  </div>
+
+  <!-- 7 · LA COLECCIÓN (lienzo) --------------------------------------- -->
+  <section id="coleccion" class="section amb-lienzo" aria-labelledby="coleccion-title">
+    <div class="wrap">
+      <div class="section-head reveal">
+        <span class="eyebrow">Catálogo</span>
+        <h2 id="coleccion-title" class="display">La <span class="gold">colección</span></h2>
+        <p>Cada pieza se hace por encargo con la fragancia y el color que elijas. Precios en pesos colombianos.</p>
+      </div>
+      <div class="toolbar reveal">
+        <div class="filters-wrap">
+          <div class="filters" role="group" aria-label="Filtrar por línea">
+            <button class="chip" data-filter="todas" aria-pressed="true">Todas</button>
+            <button class="chip" data-filter="flores" aria-pressed="false">Flores</button>
+            <button class="chip" data-filter="botanica" aria-pressed="false">Botánica</button>
+            <button class="chip" data-filter="figuras" aria-pressed="false">Figuras</button>
+            <button class="chip" data-filter="recipientes" aria-pressed="false">Recipientes</button>
+          </div>
+        </div>
+        <div class="tools">
+          <label class="search" for="buscador">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3"/></svg>
+            <input id="buscador" type="search" placeholder="Buscar por nombre o material" autocomplete="off">
+          </label>
+          <button type="button" id="orden" class="sort-btn" data-sort="default" aria-label="Ordenar: sugerido">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 6v13M8 19l-3-3M8 19l3-3M16 18V5M16 5l-3 3M16 5l3 3"/></svg>
+          </button>
+        </div>
+      </div>
+      <p class="count" id="count" aria-live="polite"></p>
+      <div class="products" id="products"></div>
+    </div>
+  </section>
+
+  <button class="fav-toggle" id="favToggle" type="button" hidden aria-haspopup="dialog" aria-expanded="false">
+    <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 21s-7.5-4.6-10.2-9.1C.1 8.9 1 5.4 4.2 4.2 6.5 3.3 9 4 12 6.8 15 4 17.5 3.3 19.8 4.2c3.2 1.2 4.1 4.7 2.4 7.7C19.5 16.4 12 21 12 21Z"/></svg>
+    <span id="favCount">0</span>
+  </button>
+  <div class="fav-panel" id="favPanel" role="dialog" aria-label="Favoritos" hidden>
+    <div class="fav-panel-head">
+      <h3 class="serif">Tus favoritos</h3>
+      <button type="button" id="favClose" aria-label="Cerrar favoritos">✕</button>
+    </div>
+    <div class="fav-list" id="favList"></div>
+    <a class="btn btn-wa" id="favSend" href="#" target="_blank" rel="noopener">
+      <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 2a10 10 0 0 0-8.6 15.1L2 22l5.1-1.3A10 10 0 1 0 12 2Zm0 18.2a8.2 8.2 0 0 1-4.2-1.2l-.3-.2-3 .8.8-2.9-.2-.3A8.2 8.2 0 1 1 12 20.2Zm4.5-6.1c-.2-.1-1.5-.7-1.7-.8s-.4-.1-.6.1-.6.8-.8 1-.3.2-.5.1a6.7 6.7 0 0 1-3.3-2.9c-.3-.4.3-.4.7-1.3.1-.2 0-.3 0-.4l-.8-1.8c-.2-.5-.4-.4-.6-.4h-.5a1 1 0 0 0-.7.3 3 3 0 0 0-.9 2.2 5.2 5.2 0 0 0 1.1 2.8 12 12 0 0 0 4.6 4c1.7.7 2.3.8 3.2.7a2.7 2.7 0 0 0 1.8-1.3 2.2 2.2 0 0 0 .2-1.3c-.1-.1-.3-.2-.5-.3Z"/></svg>
+      Enviar lista por WhatsApp
+    </a>
+  </div>
+  <dialog class="quickview" id="quickview">
+    <button type="button" class="qv-close" id="qvClose" aria-label="Cerrar">✕</button>
+    <div class="qv-body" id="qvBody"></div>
+  </dialog>
+
+  <!-- 8 · RECORDATORIOS (lienzo) -------------------------------------- -->
+  <section id="recordatorios" class="section amb-lienzo" aria-labelledby="rec-title">
+    <div class="wrap">
+      <div class="section-head reveal">
+        <span class="eyebrow">Línea exclusiva para eventos</span>
+        <h2 id="rec-title" class="display">Recordatorios que <span class="gold">perduran</span></h2>
+        <p>Los momentos más importantes merecen un detalle que se quede en el corazón de tus invitados. Cada recordatorio incluye etiqueta a medida con nombre, fecha y mensaje de la celebración.</p>
+      </div>
+      <div class="eventos reveal">
+        <div class="evento">
+          <div class="dots" aria-hidden="true"><i style="background:#9BD4FF"></i><i style="background:#E3A9B4"></i><i style="background:#C49A45"></i></div>
+          <h3 class="serif">XV Años</h3>
+          <p>Diseños en tonos azules, rosas o dorados, con elefantes de la suerte o rosas delicadas según la temática de la fiesta.</p>
+        </div>
+        <div class="evento">
+          <div class="dots" aria-hidden="true"><i style="background:#FFFCF5"></i><i style="background:#C9B9E4"></i></div>
+          <h3 class="serif">Bautizos y Primeras Comuniones</h3>
+          <p>Piezas que evocan pureza y paz: yeso blanco y aromas suaves como lavanda o algodón.</p>
+        </div>
+        <div class="evento">
+          <div class="dots" aria-hidden="true"><i style="background:#E9E4EA"></i><i style="background:#E3A9B4"></i></div>
+          <h3 class="serif">Bodas y Aniversarios</h3>
+          <p>Cristal y mármol con flores de cera de soja, símbolo de un amor que no se marchita.</p>
+        </div>
+        <div class="evento">
+          <div class="dots" aria-hidden="true"><i style="background:#4A3B39"></i><i style="background:#C49A45"></i></div>
+          <h3 class="serif">Eventos corporativos</h3>
+          <p>Regalos de agradecimiento con el logo o mensaje de tu empresa, listos para entregar.</p>
+        </div>
+      </div>
+      <div class="rec-grid" id="recs"></div>
+      <div class="personaliza reveal">
+        <p><strong>Personalización total.</strong> Elige color, fragancia, figura y cinta. Los precios al mayor aplican para pedidos de recordatorios por cantidad; el acetato de empaque es opcional en las piezas que lo indican.</p>
+        <a class="btn btn-oro" href="https://wa.me/573214034007?text=Hola%20Yeska%20Essence%2C%20quiero%20cotizar%20recordatorios%20para%20mi%20evento" target="_blank" rel="noopener">Cotizar recordatorios</a>
+      </div>
+    </div>
+  </section>
+
+  <!-- 9 · transición nude → malva ------------------------------------- -->
+  <div class="transicion a-inmersivo" aria-hidden="true">
+    <svg class="arco-svg" viewBox="0 0 1440 160" preserveAspectRatio="none"><path d="M0 160V96C240 20 480 0 720 0s480 20 720 96v64Z" fill="#F3E8E6"/></svg>
+  </div>
+
+  <!-- 10 · PROCESO ---------------------------------------------------- -->
+  <section id="proceso" class="section proceso amb-inmersivo" aria-labelledby="proceso-title">
+    <div class="wrap">
+      <div class="section-head reveal">
+        <div>
+          <span class="eyebrow">Cómo nace cada pieza</span>
+          <h2 id="proceso-title" class="display">Un proceso <span class="gold">meticuloso</span> y dedicado</h2>
+        </div>
+      </div>
+      <div class="pasos">
+        <div class="paso reveal">
+          <div class="marco">
+            <img src="img/proceso.png" width="900" height="765" alt="Vasijas de yeso recién desmoldadas, aún sin pulir" loading="lazy" decoding="async">
+            <span class="filete" aria-hidden="true"></span>
+            <span class="num" aria-hidden="true">1</span>
+          </div>
+          <div>
+            <span class="k">Primero, el yeso</span>
+            <h3>Moldear y pulir</h3>
+            <p>Cada vasija, bandeja o jarrón se vierte y se lija a mano hasta lograr un acabado suave y uniforme.</p>
+          </div>
+        </div>
+        <div class="paso reveal">
+          <div class="marco">
+            <img src="img/proceso-trio.jpg" width="900" height="765" alt="Vasija acanalada de yeso con tapa sobre bandeja a juego" loading="lazy" decoding="async">
+            <span class="filete" aria-hidden="true"></span>
+            <span class="num" aria-hidden="true">2</span>
+          </div>
+          <div>
+            <span class="k">Luego, la cera</span>
+            <h3>Esculpir en soja</h3>
+            <p>Peonías, rosas, cactus y figuras se esculpen en cera de soja teñida en tonos pastel y se perfuman con la fragancia elegida.</p>
+          </div>
+        </div>
+        <div class="paso reveal">
+          <div class="marco">
+            <img src="img/proceso-set.jpg" width="900" height="765" alt="Set de vasijas de yeso con flores y lazos en tonos pastel, listo para entregar" loading="lazy" decoding="async">
+            <span class="filete" aria-hidden="true"></span>
+            <span class="num" aria-hidden="true">3</span>
+          </div>
+          <div>
+            <span class="k">Al final, el detalle</span>
+            <h3>Vestir y empacar</h3>
+            <p>Lazo de fique o cinta de color, flores artificiales, caja o acetato y la etiqueta con tu mensaje.</p>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 11 · CONTACTO --------------------------------------------------- -->
+  <section id="contacto" class="section contacto amb-inmersivo" aria-labelledby="contacto-title">
+    <div class="wrap">
+      <div class="grid">
+        <div class="reveal">
+          <span class="eyebrow">Pedidos y cotizaciones</span>
+          <h2 id="contacto-title" class="display">Escríbenos y <span class="script">encendamos</span> tu momento</h2>
+          <p class="lead">Cuéntanos qué pieza te gustó, la fragancia que prefieres y para cuándo la necesitas. Respondemos por WhatsApp.</p>
+          <div class="contact-list">
+            <a class="contact-row" href="https://wa.me/573214034007" target="_blank" rel="noopener">
+              <span class="ic wa" aria-hidden="true"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 2a10 10 0 0 0-8.6 15.1L2 22l5.1-1.3A10 10 0 1 0 12 2Zm0 18.2a8.2 8.2 0 0 1-4.2-1.2l-.3-.2-3 .8.8-2.9-.2-.3A8.2 8.2 0 1 1 12 20.2Zm4.5-6.1c-.2-.1-1.5-.7-1.7-.8s-.4-.1-.6.1-.6.8-.8 1-.3.2-.5.1a6.7 6.7 0 0 1-3.3-2.9c-.3-.4.3-.4.7-1.3.1-.2 0-.3 0-.4l-.8-1.8c-.2-.5-.4-.4-.6-.4h-.5a1 1 0 0 0-.7.3 3 3 0 0 0-.9 2.2 5.2 5.2 0 0 0 1.1 2.8 12 12 0 0 0 4.6 4c1.7.7 2.3.8 3.2.7a2.7 2.7 0 0 0 1.8-1.3 2.2 2.2 0 0 0 .2-1.3c-.1-.1-.3-.2-.5-.3Z"/></svg></span>
+              <div><b>321 403 4007</b><span>WhatsApp</span></div>
+            </a>
+            <a class="contact-row" href="https://wa.me/573165252600" target="_blank" rel="noopener">
+              <span class="ic wa" aria-hidden="true"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 2a10 10 0 0 0-8.6 15.1L2 22l5.1-1.3A10 10 0 1 0 12 2Zm0 18.2a8.2 8.2 0 0 1-4.2-1.2l-.3-.2-3 .8.8-2.9-.2-.3A8.2 8.2 0 1 1 12 20.2Zm4.5-6.1c-.2-.1-1.5-.7-1.7-.8s-.4-.1-.6.1-.6.8-.8 1-.3.2-.5.1a6.7 6.7 0 0 1-3.3-2.9c-.3-.4.3-.4.7-1.3.1-.2 0-.3 0-.4l-.8-1.8c-.2-.5-.4-.4-.6-.4h-.5a1 1 0 0 0-.7.3 3 3 0 0 0-.9 2.2 5.2 5.2 0 0 0 1.1 2.8 12 12 0 0 0 4.6 4c1.7.7 2.3.8 3.2.7a2.7 2.7 0 0 0 1.8-1.3 2.2 2.2 0 0 0 .2-1.3c-.1-.1-.3-.2-.5-.3Z"/></svg></span>
+              <div><b>316 525 2600</b><span>WhatsApp</span></div>
+            </a>
+            <a class="contact-row" href="https://www.instagram.com/Yeska_Essence" target="_blank" rel="noopener">
+              <span class="ic ig" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="5"/><circle cx="12" cy="12" r="4"/><circle cx="17.5" cy="6.5" r="1" fill="currentColor" stroke="none"/></svg></span>
+              <div><b>@Yeska_Essence</b><span>Instagram · novedades y piezas nuevas</span></div>
+            </a>
+          </div>
+        </div>
+        <figure class="arco reveal">
+          <img src="img/abrazo-aromatico.jpg" width="900" height="1125" alt="Abrazo Aromático: osito en cera sobre rosas de colores con lazo" loading="lazy" decoding="async">
+          <span class="filete" aria-hidden="true"></span>
+        </figure>
+      </div>
+    </div>
+  </section>
+</main>
+
+<footer>
+  <div class="wrap">
+    <span class="brand-mark"><img src="img/logo-badge.png" alt="" width="34" height="34"> Yeska Essence · Velas artesanales en cera de soja y yeso · Colombia</span>
+    <span class="lema">"Transformamos la luz en arte, y el aroma en recuerdos."</span>
+  </div>
+</footer>
+
+<button class="top" id="toTop" type="button" aria-label="Volver arriba">
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M12 19V5M5 12l7-7 7 7"/></svg>
+</button>
+
+<script is:inline define:vars={{ siteData }}>
+
+  const WA = 'https://wa.me/573214034007?text=';
+  const pedir = (name) => WA + encodeURIComponent(`Hola Yeska Essence, me interesa "${name}". ¿Me cuentan fragancias y disponibilidad?`);
+  const reduce = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  // Los textos vienen del panel admin: se escapan antes de pintarlos como HTML.
+  // Sin esto, un nombre con comillas (Vela "Luna") rompía la tarjeta entera.
+  const ESC = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' };
+  const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ESC[c]);
+
+  // ---------- preloader: letras, anillo, y disolver (nunca más de ~2.6 s) ----------
+  (() => {
+    const pre = document.getElementById('preload');
+    const word = document.getElementById('preWord');
+    const text = word.textContent; word.textContent = '';
+    [...text].forEach((ch, i) => {
+      const s = document.createElement('span');
+      s.textContent = ch === ' ' ? ' ' : ch; s.style.animationDelay = (0.35 + i * 0.05) + 's';
+      word.appendChild(s);
+    });
+    const start = performance.now();
+    const cerrar = () => pre.classList.add('done');
+    const finish = () => setTimeout(cerrar, Math.max(0, 1100 - (performance.now() - start)));
+    if (document.readyState !== 'loading') finish();
+    else document.addEventListener('DOMContentLoaded', finish, { once: true });
+    setTimeout(cerrar, 1500);   // tope duro: el §4 pide máximo 1,5 s
+  })();
+
+  // ---------- foco atrapado en superficies modales ----------
+  // Devuelve el foco al disparador al cerrar, y mantiene el Tab dentro.
+  const FOCO = 'a[href], button:not([disabled]), input, select, textarea, [tabindex]:not([tabindex="-1"])';
+  function atrapar(caja, e) {
+    if (e.key !== 'Tab') return;
+    const items = [...caja.querySelectorAll(FOCO)].filter((el) => el.offsetParent !== null);
+    if (!items.length) return;
+    const primero = items[0], ultimo = items[items.length - 1];
+    if (e.shiftKey && document.activeElement === primero) { e.preventDefault(); ultimo.focus(); }
+    else if (!e.shiftKey && document.activeElement === ultimo) { e.preventDefault(); primero.focus(); }
+  }
+
+  // ---------- menú ----------
+  const menu = document.getElementById('menu');
+  const menuBtn = document.getElementById('menuBtn');
+  const setMenu = (open) => {
+    menu.classList.toggle('open', open);
+    menu.toggleAttribute('inert', !open);
+    menuBtn.setAttribute('aria-expanded', String(open));
+    menuBtn.setAttribute('aria-label', open ? 'Cerrar menú' : 'Abrir menú');
+    document.body.classList.toggle('locked', open);
+    if (open) { const a = menu.querySelector(FOCO); if (a) a.focus(); }
+    else menuBtn.focus();
+  };
+  menuBtn.addEventListener('click', () => setMenu(!menu.classList.contains('open')));
+  menu.querySelectorAll('[data-close]').forEach((a) => a.addEventListener('click', () => setMenu(false)));
+  menu.addEventListener('keydown', (e) => { if (menu.classList.contains('open')) atrapar(menu, e); });
+
+  const productos = siteData.productos;
+  const lineName = { flores: 'Flores', botanica: 'Botánica', figuras: 'Figuras', recipientes: 'Recipientes' };
+  const byId = Object.fromEntries(productos.map((x) => [x.id, x]));
+  const priceNum = (p) => parseInt(p.replace(/[^\d]/g, ''), 10) || 0;
+
+  let favs = new Set();
+  try { favs = new Set(JSON.parse(localStorage.getItem('yeska-favs') || '[]')); } catch (e) {}
+  const saveFavs = () => { try { localStorage.setItem('yeska-favs', JSON.stringify([...favs])); } catch (e) {} };
+
+  const state = { filter: 'todas', query: '', sort: 'default' };
+  const grid = document.getElementById('products');
+  const countEl = document.getElementById('count');
+
+  function cardHTML(x, i) {
+    const fav = favs.has(x.id);
+    return `
+    <article class="card" data-line="${x.line}" data-id="${x.id}" style="animation-delay:${Math.min(i, 10) * 50}ms">
+      <div class="photo">
+        <img src="${esc(x.img)}" alt="${esc(x.n)}: ${esc(x.mat)}" width="400" height="500" loading="lazy" decoding="async">
+        <button type="button" class="qv-trigger" data-id="${x.id}" aria-label="Ver detalle de ${esc(x.n)}"></button>
+        <span class="tag" data-line="${x.line}">${lineName[x.line]}</span>
+        <button type="button" class="fav-btn" data-id="${x.id}" aria-pressed="${fav}" aria-label="${fav ? 'Quitar de favoritos' : 'Guardar en favoritos'}">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 21s-7.5-4.6-10.2-9.1C.1 8.9 1 5.4 4.2 4.2 6.5 3.3 9 4 12 6.8 15 4 17.5 3.3 19.8 4.2c3.2 1.2 4.1 4.7 2.4 7.7C19.5 16.4 12 21 12 21Z"/></svg>
+        </button>
+      </div>
+      <div class="info">
+        <h3>${esc(x.n)}</h3>
+        <div class="price">${x.p}${x.note ? `<small>${esc(x.note)}</small>` : ''}</div>
+      </div>
+    </article>`;
+  }
+
+  function render() {
+    const q = state.query.trim().toLowerCase();
+    let list = productos.filter((x) =>
+      (state.filter === 'todas' || x.line === state.filter) &&
+      (!q || x.n.toLowerCase().includes(q) || x.mat.toLowerCase().includes(q))
+    );
+    if (state.sort === 'asc') list = [...list].sort((a, b) => priceNum(a.p) - priceNum(b.p));
+    if (state.sort === 'desc') list = [...list].sort((a, b) => priceNum(b.p) - priceNum(a.p));
+    countEl.textContent = list.length === productos.length ? `${list.length} piezas` : `${list.length} de ${productos.length} piezas`;
+    grid.innerHTML = list.length ? list.map(cardHTML).join('') : `
+      <div class="empty">
+        <p>No encontramos piezas con esos filtros.</p>
+        <button type="button" class="btn btn-line" id="clearFilters">Quitar filtros</button>
+      </div>`;
+    const clear = document.getElementById('clearFilters');
+    if (clear) clear.addEventListener('click', () => {
+      state.filter = 'todas'; state.query = ''; setSort('default');
+      document.getElementById('buscador').value = '';
+      chips.forEach((c) => c.setAttribute('aria-pressed', String(c.dataset.filter === 'todas')));
+      render();
+    });
+  }
+
+  const chips = document.querySelectorAll('.chip');
+  chips.forEach((ch) => ch.addEventListener('click', () => {
+    state.filter = ch.dataset.filter;
+    chips.forEach((c) => c.setAttribute('aria-pressed', String(c === ch)));
+    render();
+  }));
+
+  // Los chips ya no se envuelven en dos filas: si no caben, la tira se
+  // desplaza. El táctil ya sabe deslizar solo; esto le da lo mismo al mouse
+  // (arrastrar para desplazar), que si no se queda sin forma de ver los que
+  // no caben en pantalla.
+  const filtros = document.querySelector('.filters');
+  if (filtros) {
+    // Un mouse (y sobre todo un trackpad) casi nunca queda perfectamente
+    // quieto entre bajar y soltar el clic: con un umbral de solo 3px, ese
+    // temblor normal ya contaba como "arrastre" y se comía el clic del
+    // filtro. Ahora el arrastre (y el pointer-events:none de los chips) solo
+    // se activa si de verdad se cruzan 6px — por debajo de eso es un clic.
+    const UMBRAL = 6;
+    let bajando = false, arrastrando = false, inicioX = 0, inicioScroll = 0;
+    filtros.addEventListener('pointerdown', (e) => {
+      if (e.pointerType !== 'mouse') return;
+      bajando = true; arrastrando = false;
+      inicioX = e.clientX; inicioScroll = filtros.scrollLeft;
+    });
+    window.addEventListener('pointermove', (e) => {
+      if (!bajando) return;
+      const dx = e.clientX - inicioX;
+      if (!arrastrando && Math.abs(dx) > UMBRAL) { arrastrando = true; filtros.classList.add('arrastrando'); }
+      if (arrastrando) filtros.scrollLeft = inicioScroll - dx;
+    });
+    window.addEventListener('pointerup', () => { bajando = false; });
+    // Si hubo arrastre real, el click que sigue al soltar no debe filtrar nada.
+    filtros.addEventListener('click', (e) => {
+      if (arrastrando) { e.preventDefault(); e.stopPropagation(); }
+      arrastrando = false; filtros.classList.remove('arrastrando');
+    }, true);
+  }
+  let searchTimer;
+  document.getElementById('buscador').addEventListener('input', (e) => {
+    clearTimeout(searchTimer);
+    const val = e.target.value;
+    searchTimer = setTimeout(() => { state.query = val; render(); }, 150);
+  });
+  // Un solo botón-icono en vez de un <select>: un clic hace ciclar entre las
+  // tres formas de orden. El estado sale por aria-label (para lectores de
+  // pantalla) y por data-sort (para el anillo dorado que lo marca activo).
+  const sortModes = [
+    { key: 'default', label: 'Ordenar: sugerido' },
+    { key: 'asc', label: 'Ordenar: precio de menor a mayor' },
+    { key: 'desc', label: 'Ordenar: precio de mayor a menor' },
+  ];
+  const ordenBtn = document.getElementById('orden');
+  const setSort = (key) => {
+    state.sort = key;
+    ordenBtn.dataset.sort = key;
+    ordenBtn.setAttribute('aria-label', sortModes.find((m) => m.key === key).label);
+  };
+  ordenBtn.addEventListener('click', () => {
+    const i = sortModes.findIndex((m) => m.key === state.sort);
+    setSort(sortModes[(i + 1) % sortModes.length].key);
+    render();
+  });
+
+  const favToggle = document.getElementById('favToggle');
+  const favPanel = document.getElementById('favPanel');
+  const favList = document.getElementById('favList');
+  const favCount = document.getElementById('favCount');
+  const favSend = document.getElementById('favSend');
+  function renderFavs() {
+    favCount.textContent = favs.size;
+    favToggle.hidden = favs.size === 0;
+    if (favs.size === 0) favPanel.hidden = true;
+    favList.innerHTML = favs.size ? [...favs].map((id) => {
+      const x = byId[id]; if (!x) return '';
+      return `
+      <div class="fav-row">
+        <img src="${esc(x.img)}" alt="" width="46" height="46" loading="lazy">
+        <div><div class="fr-name">${esc(x.n)}</div><div class="fr-price">${x.p}</div></div>
+        <button type="button" data-id="${x.id}" aria-label="Quitar ${esc(x.n)}">✕</button>
+      </div>`;
+    }).join('') : `<div class="fav-empty">Aún no guardas piezas. Toca el corazón en una foto para añadirla aquí.</div>`;
+    const items = [...favs].map((id) => byId[id]).filter(Boolean);
+    const msg = items.length
+      ? `Hola Yeska Essence, quiero cotizar estas piezas:\n${items.map((x) => `• ${x.n} (${x.p})`).join('\n')}`
+      : 'Hola Yeska Essence, quiero hacer un pedido';
+    favSend.href = WA + encodeURIComponent(msg);
+  }
+  function toggleFav(id) {
+    if (favs.has(id)) favs.delete(id); else favs.add(id);
+    saveFavs(); renderFavs(); render();
+    favToggle.classList.remove('bump'); void favToggle.offsetWidth; favToggle.classList.add('bump');
+  }
+  const setFavPanel = (open) => {
+    favPanel.hidden = !open;
+    favToggle.setAttribute('aria-expanded', String(open));
+    if (open) { const a = favPanel.querySelector(FOCO); if (a) a.focus(); }
+    else if (!favToggle.hidden) favToggle.focus();
+  };
+  favToggle.addEventListener('click', () => setFavPanel(favPanel.hidden));
+  document.getElementById('favClose').addEventListener('click', () => setFavPanel(false));
+  favPanel.addEventListener('keydown', (e) => atrapar(favPanel, e));
+  favList.addEventListener('click', (e) => { const btn = e.target.closest('button[data-id]'); if (btn) toggleFav(btn.dataset.id); });
+
+  const qv = document.getElementById('quickview');
+  const qvBody = document.getElementById('qvBody');
+  function openQuickview(id) {
+    const x = byId[id]; if (!x) return;
+    qvBody.innerHTML = `
+      <img src="${esc(x.img)}" alt="${esc(x.n)}: ${esc(x.mat)}" width="500" height="625">
+      <div class="qv-info">
+        <span class="tag" data-line="${x.line}">${lineName[x.line]}</span>
+        <h3>${esc(x.n)}</h3>
+        <p class="mat">${esc(x.mat)}</p>
+        <div class="price">${x.p}${x.note ? `<small>${esc(x.note)}</small>` : ''}</div>
+        <div class="ctas">
+          <a class="btn btn-oro" href="${pedir(x.n)}" target="_blank" rel="noopener">Pedir por WhatsApp</a>
+          <button type="button" class="btn btn-line qv-fav" data-id="${x.id}">${favs.has(x.id) ? 'Quitar de favoritos' : 'Guardar en favoritos'}</button>
+        </div>
+      </div>`;
+    qv.showModal();
+  }
+  grid.addEventListener('click', (e) => {
+    const favBtn = e.target.closest('.fav-btn');
+    if (favBtn) { toggleFav(favBtn.dataset.id); return; }
+    const trigger = e.target.closest('.qv-trigger');
+    if (trigger) openQuickview(trigger.dataset.id);
+  });
+  qvBody.addEventListener('click', (e) => {
+    const btn = e.target.closest('.qv-fav');
+    if (btn) { toggleFav(btn.dataset.id); btn.textContent = favs.has(btn.dataset.id) ? 'Quitar de favoritos' : 'Guardar en favoritos'; }
+  });
+  document.getElementById('qvClose').addEventListener('click', () => qv.close());
+  qv.addEventListener('click', (e) => { if (e.target === qv) qv.close(); });
+
+  // Escape cierra la superficie abierta más superficial. El <dialog> ya lo
+  // hace solo; aquí cubrimos el menú y el panel de favoritos.
+  document.addEventListener('keydown', (e) => {
+    if (e.key !== 'Escape') return;
+    if (menu.classList.contains('open')) { setMenu(false); return; }
+    if (!favPanel.hidden) setFavPanel(false);
+  });
+
+  render();
+  renderFavs();
+
+  const recs = siteData.recs;
+  document.getElementById('recs').innerHTML = recs.map((r) => `
+    <article class="rec">
+      <img src="${esc(r.img)}" alt="${esc(r.n)}" width="120" height="150" loading="lazy" decoding="async">
+      <div>
+        <h3 class="serif">${esc(r.n)}</h3>
+        <p>${esc(r.d)}</p>
+        <table>
+          <thead><tr><th>Opción</th><th style="text-align:right">Unidad</th><th style="text-align:right">Al mayor</th></tr></thead>
+          <tbody>${r.rows.map(([o, u, m]) => `<tr><td>${esc(o)}</td><td class="n">$${u}</td><td class="n m">$${m}</td></tr>`).join('')}</tbody>
+        </table>
+        ${r.note ? `<p class="note">${esc(r.note)}</p>` : ''}
+      </div>
+    </article>`).join('');
+
+  const ticker = document.getElementById('ticker');
+  ticker.innerHTML += ticker.innerHTML;
+
+  // ---------- scroll: nav, botón de subir y parallax, todo en un rAF ----------
+  const nav = document.getElementById('nav');
+  const toTop = document.getElementById('toTop');
+  const capas = [...document.querySelectorAll('.par')].map((el) => ({ el, v: parseFloat(el.dataset.par) || 1, base: 0 }));
+  const parallaxOn = !reduce && window.matchMedia('(min-width: 768px)').matches;
+
+  // Las medidas de layout se toman aquí, NUNCA dentro del listener de scroll.
+  let vh = window.innerHeight;
+  function medir() {
+    vh = window.innerHeight;
+    if (!parallaxOn) return;   // sin parallax no hay nada que medir: evita un reflujo forzado
+    const y = window.scrollY;
+    for (const c of capas) c.base = c.el.getBoundingClientRect().top + y;
+  }
+
+  let ticking = false, scrollY = 0;
+  function pintar() {
+    ticking = false;
+    nav.classList.toggle('scrolled', scrollY > 80);   // el header no existe hasta aqui
+    toTop.classList.toggle('show', scrollY > 600);
+    if (!parallaxOn) return;
+    for (const c of capas) {
+      const d = (scrollY + vh / 2 - c.base) * (c.v - 1);
+      c.el.style.transform = `translate3d(0, ${Math.max(-160, Math.min(160, d)).toFixed(1)}px, 0)`;
+    }
+  }
+  function onScroll() {
+    scrollY = window.scrollY;
+    if (!ticking) { ticking = true; requestAnimationFrame(pintar); }
+  }
+  window.addEventListener('scroll', onScroll, { passive: true });
+  window.addEventListener('resize', () => { medir(); onScroll(); }, { passive: true });
+  window.addEventListener('load', () => { medir(); onScroll(); });
+  medir(); onScroll();
+  toTop.addEventListener('click', () => window.scrollTo({ top: 0, behavior: reduce ? 'auto' : 'smooth' }));
+
+  // ---------- revelado al entrar en viewport, escalonado entre hermanos ----------
+  (() => {
+    const items = [...document.querySelectorAll('.reveal')];
+    if (!items.length) return;
+    if (reduce || !('IntersectionObserver' in window)) { items.forEach((el) => el.classList.add('dentro')); return; }
+    const porPadre = new Map();
+    items.forEach((el) => {
+      const i = porPadre.get(el.parentElement) || 0;
+      porPadre.set(el.parentElement, i + 1);
+      if (i) el.style.transitionDelay = Math.min(i, 5) * 70 + 'ms';
+    });
+    const io = new IntersectionObserver((entries) => {
+      for (const e of entries) {
+        if (!e.isIntersecting) continue;
+        e.target.classList.add('dentro');
+        io.unobserve(e.target);
+      }
+    }, { threshold: 0.15 });
+    items.forEach((el) => io.observe(el));
+  })();
+
+  // ---------- polvo dorado: fijo a la ventana, recorre toda la página ----------
+  // Un único canvas de viewport completo (position:fixed en el CSS), no uno
+  // por sección: más intenso mientras el hero llena la pantalla ("bienvenida"),
+  // se atenúa en cuanto se hace scroll y queda como brillo apenas perceptible
+  // el resto del recorrido. La cuenta de partículas activas y su brillo se
+  // recalculan con el scroll; el resto de la reserva sigue su ciclo de vida
+  // en silencio (sin dibujarse) para no "aparecer" de golpe al reactivarse.
+  const canvas = document.getElementById('embers');
+  if (canvas && !reduce) {
+    const ctx = canvas.getContext('2d');
+    const dpr = Math.min(devicePixelRatio || 1, 2);
+    let W, H, sparks = [];
+    const resize = () => { const r = canvas.getBoundingClientRect(); W = canvas.width = Math.floor(r.width * dpr); H = canvas.height = Math.floor(r.height * dpr); };
+    // Oro claro y oro hondo llevan el peso; blanco y plateado dan el chispazo
+    // diamantado, sin caer en un confeti de colores.
+    const paleta = () => {
+      const r = Math.random();
+      if (r < 0.55) return '233,207,122';  // oro claro
+      if (r < 0.80) return '196,154,69';   // oro hondo
+      if (r < 0.92) return '255,255,255';  // blanco brillante
+      return '225,232,238';                // plateado frío
+    };
+    const make = () => ({
+      x: Math.random() * W, y: H + 20, r: (0.9 + Math.random() * 2.2) * dpr,
+      vy: (0.15 + Math.random() * 0.45) * dpr, vx: (Math.random() - 0.5) * 0.25 * dpr,
+      a: 0, life: 0, max: 400 + Math.random() * 500,
+      hue: paleta(),
+    });
+    resize(); window.addEventListener('resize', resize, { passive: true });
+    const nMax = window.innerWidth < 768 ? 20 : 44; // el "empujón" de bienvenida del hero
+    const nMin = window.innerWidth < 768 ? 9  : 20; // sutil, pero se tiene que notar
+    for (let i = 0; i < nMax; i++) { const s = make(); s.y = Math.random() * H; s.life = Math.random() * s.max; sparks.push(s); }
+    const heroH = document.querySelector('.hero')?.offsetHeight || 800;
+    let mezcla = 1; // 1 = plena intensidad del hero, baja hacia 0 según se aleja el scroll
+    const medirMezcla = () => {
+      const t = Math.min(1, window.scrollY / heroH);
+      mezcla = 1 - t * t * (3 - 2 * t); // smoothstep: la transición no se siente de golpe
+    };
+    medirMezcla();
+    window.addEventListener('scroll', medirMezcla, { passive: true });
+    const tick = () => {
+      ctx.clearRect(0, 0, W, H);
+      const activos = Math.round(nMin + (nMax - nMin) * mezcla);
+      const brillo = 0.55 + 0.45 * mezcla; // nunca cae del todo: "sutil" no es "invisible"
+      for (let i = 0; i < sparks.length; i++) {
+        const s = sparks[i];
+        s.life++; s.y -= s.vy; s.x += s.vx + Math.sin(s.life / 40) * 0.2 * dpr;
+        const t = s.life / s.max; s.a = t < 0.2 ? t / 0.2 : (1 - t);
+        if (s.life > s.max || s.y < -20) { Object.assign(s, make()); continue; }
+        if (i >= activos) continue;
+        const alpha = s.a * brillo * 0.85;
+        // Destello: un halo suave (el "diamantado") con un núcleo brillante
+        // encima — un círculo plano de 1-3px casi no se ve; el halo sí.
+        const glowR = s.r * 3.4;
+        const grad = ctx.createRadialGradient(s.x, s.y, 0, s.x, s.y, glowR);
+        grad.addColorStop(0, `rgba(${s.hue},${alpha.toFixed(3)})`);
+        grad.addColorStop(.45, `rgba(${s.hue},${(alpha * .45).toFixed(3)})`);
+        grad.addColorStop(1, `rgba(${s.hue},0)`);
+        ctx.fillStyle = grad;
+        ctx.beginPath(); ctx.arc(s.x, s.y, glowR, 0, Math.PI * 2); ctx.fill();
+        ctx.beginPath(); ctx.arc(s.x, s.y, s.r, 0, Math.PI * 2);
+        ctx.fillStyle = `rgba(${s.hue},${Math.min(1, alpha * 1.4).toFixed(3)})`; ctx.fill();
+      }
+      requestAnimationFrame(tick);
+    };
+    tick();
+  }
+</script>
+</body>
+</html>
