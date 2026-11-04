@@ -1279,6 +1279,29 @@ const catalogoLD = jsonLD({
   medir(); onScroll();
   toTop.addEventListener('click', () => window.scrollTo({ top: 0, behavior: reduce ? 'auto' : 'smooth' }));
 
+  // ---------- header ambientado solo sobre la colección ----------
+  // La piel de temporada del header (tema-navidad.css: .nav.en-tema) se ve
+  // solo mientras lo que pasa justo debajo del header es la colección: al
+  // subir al hero o bajar a Recordatorios vuelve el header de siempre. Lo
+  // decide un IntersectionObserver cuya "ventana" es una franja de 1px en el
+  // borde inferior del header, así no hay que medir nada durante el scroll.
+  if (document.querySelector('.tema-escena')) {
+    const coleccionSec = document.getElementById('coleccion');
+    let vigia, esperaVigia;
+    const vigilarNav = () => {
+      if (vigia) vigia.disconnect();
+      const h = nav.offsetHeight;
+      vigia = new IntersectionObserver(([e]) => nav.classList.toggle('en-tema', e.isIntersecting), {
+        rootMargin: `-${Math.max(0, h - 1)}px 0px -${Math.max(0, window.innerHeight - h)}px 0px`,
+      });
+      vigia.observe(coleccionSec);
+    };
+    vigilarNav();
+    // El alto del header y de la ventana cambian al girar el celular o
+    // redimensionar: la franja se vuelve a trazar.
+    window.addEventListener('resize', () => { clearTimeout(esperaVigia); esperaVigia = setTimeout(vigilarNav, 150); }, { passive: true });
+  }
+
   // ---------- revelado al entrar en viewport, escalonado entre hermanos ----------
   (() => {
     const items = [...document.querySelectorAll('.reveal')];
