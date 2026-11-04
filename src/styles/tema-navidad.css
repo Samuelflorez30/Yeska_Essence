@@ -64,10 +64,9 @@
   background: rgba(158, 43, 51, .07); border: 1px solid rgba(158, 43, 51, .2); color: var(--tinta);
 }
 
-/* Fila del conteo: la cuenta regresiva ocupa su lugar siempre (invisible
-   fuera del tema), así elegir Navidad no empuja la grilla. */
+/* Fila bajo los filtros: la cuenta regresiva ocupa su lugar siempre
+   (invisible fuera del tema), así elegir Navidad no empuja la grilla. */
 .conteo-fila { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 14px; margin: 0 0 22px; }
-.conteo-fila .count { margin: 0; transition: color var(--nv-dur) var(--ease); }
 .cuenta-navidad {
   display: inline-flex; align-items: center; gap: 8px; margin: 0; padding: 5px 14px 5px 10px; border-radius: 999px;
   font-size: .8rem; font-weight: 700; letter-spacing: .02em; color: var(--nv-oro);
@@ -175,12 +174,57 @@ html[data-linea-tema="navidad"] .tema-ventisquero { opacity: 1; translate: 0 0; 
 html[data-linea-tema="navidad"] .transicion.a-lienzo .arco-svg path { fill: var(--nv-noche); }
 html[data-linea-tema="navidad"] .tema-estrellas i { opacity: 1; animation: nv-titilar calc(2.6s + var(--d)) ease-in-out calc(var(--d) * -1) infinite; }
 
-/* El vidrio del header es translúcido: sobre la noche se ensuciaba. Durante
-   la ambientación gana opacidad y sigue siendo el malva de la marca. */
-html[data-linea-tema="navidad"] .nav.scrolled { background: color-mix(in srgb, var(--malva) 94%, transparent); }
+/* ------------------------------------------------------ header navideño --- */
+/* Misma estructura del header; solo cambia la piel, y solo cuando ya está
+   pegado arriba (.scrolled): sobre el hero sigue transparente como siempre.
+   Es la misma noche con la que arranca la colección, así barra y sección se
+   leen como una sola: verde noche en vidrio casi opaco, un resplandor de vela
+   detrás del logo y un filete de oro abajo que se apaga en las puntas, como
+   el cable de la guirnalda. La noche entra por una capa (::before) que se
+   funde, porque un degradado no se puede animar. */
+.nav::before {
+  content: ""; position: absolute; inset: 0; z-index: -1; pointer-events: none;
+  opacity: 0; transition: opacity .6s var(--ease);
+  background:
+    linear-gradient(90deg, transparent 4%, rgba(233, 207, 122, .55) 30%, rgba(233, 207, 122, .55) 70%, transparent 96%) left bottom / 100% 1px no-repeat,
+    radial-gradient(340px 150% at 50% 50%, rgba(233, 207, 122, .2), transparent 72%),
+    linear-gradient(180deg, rgba(11, 26, 18, .97) 0%, rgba(17, 38, 25, .94) 100%);
+}
+.nav-links a { transition: color .5s var(--ease); }
+.nav-links li + li::before { transition: background-color .5s var(--ease); }
+.brand img { transition: filter .6s var(--ease); }
+.menu-btn { transition: background .25s, border-color .5s var(--ease); }
+.menu-btn i { transition: transform .4s var(--ease), opacity .3s, background-color .5s var(--ease); }
+
+html[data-linea-tema="navidad"] .nav.scrolled {
+  background-color: transparent;
+  box-shadow: 0 14px 34px -20px rgba(0, 0, 0, .7);
+}
+html[data-linea-tema="navidad"] .nav.scrolled::before { opacity: 1; }
+html[data-linea-tema="navidad"] .nav.scrolled .brand-word { color: var(--nv-crema); }
+html[data-linea-tema="navidad"] .nav.scrolled .brand:hover .brand-word { color: var(--nv-oro); }
+html[data-linea-tema="navidad"] .nav.scrolled .brand img { filter: drop-shadow(0 0 14px rgba(233, 207, 122, .4)); }
+html[data-linea-tema="navidad"] .nav.scrolled .nav-links a { color: var(--nv-crema-suave); }
+html[data-linea-tema="navidad"] .nav.scrolled .nav-links a:hover { color: var(--nv-oro); }
+html[data-linea-tema="navidad"] .nav.scrolled .nav-links a::after { background: var(--nv-oro); }
+html[data-linea-tema="navidad"] .nav.scrolled .nav-links li + li::before { background: rgba(233, 207, 122, .4); }
+html[data-linea-tema="navidad"] .nav.scrolled .menu-btn { background: rgba(255, 255, 255, .07); border-color: rgba(233, 207, 122, .5); }
+html[data-linea-tema="navidad"] .nav.scrolled .menu-btn:hover { background: rgba(255, 255, 255, .14); }
+html[data-linea-tema="navidad"] .nav.scrolled .menu-btn i { background: var(--nv-crema); }
+
+/* El menú a pantalla completa (celular) abre sobre la misma noche */
+.menu ol a, .menu-pie a { transition: color .3s var(--ease); }
+html[data-linea-tema="navidad"] .menu { background: color-mix(in srgb, var(--nv-noche) 95%, transparent); }
+html[data-linea-tema="navidad"] .menu ol a { color: var(--nv-crema); }
+html[data-linea-tema="navidad"] .menu ol a:hover, html[data-linea-tema="navidad"] .menu ol a:active { color: var(--nv-oro); }
+html[data-linea-tema="navidad"] .menu-pie a { color: var(--nv-crema-suave); }
+html[data-linea-tema="navidad"] .menu-pie a:hover { color: var(--nv-oro); }
+html[data-linea-tema="navidad"] .menu-agua { opacity: .1; }
+/* Con el menú abierto el botón (X) queda sobre la noche aunque el header no esté pegado */
+html[data-linea-tema="navidad"] .menu-btn[aria-expanded="true"] { background: rgba(255, 255, 255, .07); border-color: rgba(233, 207, 122, .5); }
+html[data-linea-tema="navidad"] .menu-btn[aria-expanded="true"] i { background: var(--nv-crema); }
 
 /* textos sobre la noche */
-html[data-linea-tema="navidad"] #coleccion .count { color: var(--nv-crema-suave); }
 html[data-linea-tema="navidad"] #coleccion .cuenta-navidad { opacity: 1; visibility: visible; transform: none; transition: opacity .5s var(--ease) .35s, transform .5s var(--ease) .35s, visibility 0s; }
 html[data-linea-tema="navidad"] #coleccion .empty p { color: var(--nv-crema-suave); }
 

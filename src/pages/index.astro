@@ -60,9 +60,8 @@ const pedida = Astro.url.searchParams.get('linea');
 const filtroInicial = pedida && lineName[pedida] ? pedida : 'todas';
 const temaInicial = filtroInicial === 'todas' ? null : temaDe[filtroInicial];
 const productosIniciales = filtroInicial === 'todas' ? productos : productos.filter((p) => p.line === filtroInicial);
-const conteoInicial = productosIniciales.length === productos.length
-  ? `${productos.length} piezas`
-  : `${productosIniciales.length} de ${productos.length} piezas`;
+// Solo para lectores de pantalla: en pantalla no se muestra ningún conteo.
+const piezas = (n: number) => `${n} ${n === 1 ? 'pieza' : 'piezas'}`;
 
 // Cuenta regresiva de la ambientación navideña, en hora de Colombia. Solo en
 // temporada (75 días antes); del 26 en adelante desaparece sola.
@@ -682,7 +681,9 @@ const catalogoLD = jsonLD({
         </div>
       </div>
       <div class="conteo-fila">
-        <p class="count" id="count" aria-live="polite">{conteoInicial}</p>
+        <!-- Invisible: solo avisa a los lectores de pantalla cuántas piezas
+             quedan al filtrar (en pantalla ya no se muestra el conteo). -->
+        <p class="sr-only" id="count" aria-live="polite">{piezas(productosIniciales.length)}</p>
         {cuentaNavidad && (
           <p class="cuenta-navidad">
             <svg viewBox="0 0 24 24" aria-hidden="true"><g fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 12V2.5M9 5l3 3 3-3" /><path d="M12 12V2.5M9 5l3 3 3-3" transform="rotate(60 12 12)" /><path d="M12 12V2.5M9 5l3 3 3-3" transform="rotate(120 12 12)" /><path d="M12 12V2.5M9 5l3 3 3-3" transform="rotate(180 12 12)" /><path d="M12 12V2.5M9 5l3 3 3-3" transform="rotate(240 12 12)" /><path d="M12 12V2.5M9 5l3 3 3-3" transform="rotate(300 12 12)" /></g></svg>
@@ -1026,7 +1027,7 @@ const catalogoLD = jsonLD({
     );
     if (state.sort === 'asc') list = [...list].sort((a, b) => priceNum(a.p) - priceNum(b.p));
     if (state.sort === 'desc') list = [...list].sort((a, b) => priceNum(b.p) - priceNum(a.p));
-    countEl.textContent = list.length === productos.length ? `${list.length} piezas` : `${list.length} de ${productos.length} piezas`;
+    countEl.textContent = `${list.length} ${list.length === 1 ? 'pieza' : 'piezas'}`;   // solo lectores de pantalla
     grid.innerHTML = list.length ? list.map(cardHTML).join('') : `
       <div class="empty">
         <p>No encontramos piezas con esos filtros.</p>
