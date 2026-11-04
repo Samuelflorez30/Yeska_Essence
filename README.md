@@ -110,12 +110,35 @@ Entra a `tusitio.com/admin`, inicia sesión, y en **Productos**:
 **Recordatorios** funciona igual, con un botón ▸ para desplegar y editar
 las opciones de precio (unidad / al mayor) de cada uno.
 
+En **Líneas** se administran los botones de filtro de la colección
+(Flores, Navidad, San Pedro…):
+
+- **"+ Nueva línea"** → nombre y ambientación. Al crearla se abre "Traer
+  productos" para llenarla de una vez.
+- **Clic en el nombre** → se renombra. Las flechas cambian el orden de los botones.
+- **Ambientación** → "Navidad" convierte la colección en una noche de pino
+  con nieve, luces y esferas, solo mientras el cliente tiene esa línea elegida.
+- **"En el sitio"** → oculta una línea de temporada (y sus productos) sin
+  borrarla; en diciembre se vuelve a prender.
+- **"Copiar enlace"** → `tusitio.com/?linea=navidad#coleccion` abre la
+  colección ya filtrada y ambientada: ideal para Instagram y WhatsApp.
+- **Eliminar** → si la línea tiene productos, primero pregunta a qué línea
+  pasarlos. Nunca se borra un producto por eliminar una línea.
+
+> Las ambientaciones y la visibilidad de líneas necesitan dos columnas
+> nuevas: corre una vez [`supabase-migracion-lineas.sql`](./supabase-migracion-lineas.sql)
+> en el SQL Editor (las instalaciones nuevas ya las traen en el esquema).
+> Para crear la línea Navidad con las piezas navideñas de una vez, está
+> [`supabase-linea-navidad.sql`](./supabase-linea-navidad.sql) (incluye la migración).
+
 ## Estructura del proyecto
 
 ```
 src/
   lib/supabase.js       cliente de Supabase + helpers de formato de precio
   lib/authGuard.js       protege las páginas /admin (redirige si no hay sesión)
+  lib/temas.js           ambientaciones de temporada (Navidad) y slugs de línea
+  styles/tema-navidad.css decorado navideño de la colección
   layouts/AdminLayout.astro   barra lateral + logout, común a todo /admin
   styles/site.css         estilos del sitio público (el diseño ya aprobado)
   styles/admin.css        estilos del panel — paleta funcional, no decorativa
@@ -123,6 +146,7 @@ src/
   pages/admin/login.astro
   pages/admin/index.astro         panel: resumen
   pages/admin/productos.astro     panel: CRUD con edición en línea
+  pages/admin/lineas.astro        panel: líneas (crear, ordenar, ambientar, ocultar, eliminar)
   pages/admin/recordatorios.astro panel: CRUD con opciones de precio anidadas
 scripts/seed.mjs          siembra inicial (sube fotos + inserta el catálogo)
 supabase-schema.sql       esquema completo, listo para pegar en Supabase

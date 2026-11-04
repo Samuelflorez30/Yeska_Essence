@@ -1,37 +1,81 @@
 ---
 import { Image } from 'astro:assets';
 import { supabase, cop, copPlain } from '../lib/supabase.js';
+import { TEMAS, temaDeLinea } from '../lib/temas.js';
 import '../styles/site.css';
+import '../styles/tema-navidad.css';
 
 // Recortes sin fondo (ya sin margen: ver scripts/recortar-flota.mjs).
 // Pasan por <Image>, que los sirve en WebP a 1x y 2x del tamaño en pantalla.
 const recortes = import.meta.glob<ImageMetadata>('../assets/flota/*.png', { eager: true, import: 'default' });
 const recorte = (n: number) => recortes[`../assets/flota/${n}.png`];
 
-const { data: productosRaw, error: productosError } = await supabase
-  .from('productos')
-  .select('id, nombre, materiales, precio, nota, imagen_url, orden, lineas(slug)')
-  .eq('activo', true)
-  .order('orden', { ascending: true });
+// Las líneas (Flores, Navidad…) las administra el panel: aquí no hay ninguna
+// fija. '*' en vez de nombrar columnas: si la base de datos aún no tiene
+// `tema`/`activo` (supabase-migracion-lineas.sql), la consulta no falla.
+const [{ data: lineasRaw, error: lineasError }, { data: productosRaw, error: productosError }] = await Promise.all([
+  supabase.from('lineas').select('*').order('orden', { ascending: true }),
+  supabase
+    .from('productos')
+    .select('id, nombre, materiales, precio, nota, imagen_url, orden, linea_id')
+    .eq('activo', true)
+    .order('orden', { ascending: true }),
+]);
 
+if (lineasError) console.error('[Supabase] lineas:', lineasError.message);
 if (productosError) console.error('[Supabase] productos:', productosError.message);
 
-// Sin tipos generados, supabase-js supone que toda relación es un arreglo;
-// productos → lineas es muchos-a-uno y llega como un solo objeto.
-const productos = (productosRaw ?? []).map((p) => ({
-  id: p.id,
-  n: p.nombre,
-  line: (p.lineas as unknown as { slug: string } | null)?.slug ?? 'recipientes',
-  mat: p.materiales,
-  p: cop(p.precio),
-  precio: p.precio,
-  note: p.nota || undefined,
-  img: p.imagen_url || '/img/logo-badge.png',
-}));
-// Mismo mapa que usa el script del cliente (línea 640): se repite aquí, no
-// se comparte, porque este archivo vive en dos mundos (frontmatter de
-// servidor vs. <script> de navegador) que no importan variables entre sí.
-const lineName: Record<string, string> = { flores: 'Flores', botanica: 'Botánica', figuras: 'Figuras', recipientes: 'Recipientes' };
+type LineaDB = { id: string; slug: string; nombre: string; orden: number; tema?: string | null; activo?: boolean };
+const lineaPorId = new Map(((lineasRaw ?? []) as LineaDB[]).map((l) => [l.id, l]));
+
+// Una línea oculta (p. ej. Navidad en enero) se lleva sus productos con ella.
+const productos = (productosRaw ?? []).flatMap((p) => {
+  const linea = lineaPorId.get(p.linea_id);
+  if (linea?.activo === false) return [];
+  return [{
+    id: p.id,
+    n: p.nombre,
+    line: linea?.slug ?? '',
+    mat: p.materiales,
+    p: cop(p.precio),
+    precio: p.precio,
+    note: p.nota || undefined,
+    img: p.imagen_url || '/img/logo-badge.png',
+  }];
+});
+
+// Un botón de filtro por línea visible que tenga al menos una pieza: un
+// filtro que lleva a una grilla vacía no le sirve a nadie.
+const lineas = [...lineaPorId.values()]
+  .filter((l) => l.activo !== false && productos.some((p) => p.line === l.slug))
+  .map((l) => ({ slug: l.slug, nombre: l.nombre, tema: temaDeLinea(l) as keyof typeof TEMAS | null }));const lineName: Record<string, string> = Object.fromEntries(lineas.map((l) => [l.slug, l.nombre]));
+const temaDe: Record<string, string | null> = Object.fromEntries(lineas.map((l) => [l.slug, l.tema]));
+// Ambientaciones que de verdad hay que dibujar (sin línea navideña, cero decorado en el HTML).
+const temasUsados = [...new Set(lineas.map((l) => l.tema).filter((t): t is keyof typeof TEMAS => !!t))];
+const hayNavidad = temasUsados.includes('navidad');
+
+// /?linea=navidad abre la colección ya filtrada (y ambientada): es el enlace
+// que el panel deja copiar para compartir en Instagram o WhatsApp.
+const pedida = Astro.url.searchParams.get('linea');
+const filtroInicial = pedida && lineName[pedida] ? pedida : 'todas';
+const temaInicial = filtroInicial === 'todas' ? null : temaDe[filtroInicial];
+const productosIniciales = filtroInicial === 'todas' ? productos : productos.filter((p) => p.line === filtroInicial);
+const conteoInicial = productosIniciales.length === productos.length
+  ? `${productos.length} piezas`
+  : `${productosIniciales.length} de ${productos.length} piezas`;
+
+// Cuenta regresiva de la ambientación navideña, en hora de Colombia. Solo en
+// temporada (75 días antes); del 26 en adelante desaparece sola.
+const cuentaNavidad = (() => {
+  if (!hayNavidad) return null;
+  const hoy = Object.fromEntries(new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Bogota', year: 'numeric', month: 'numeric', day: 'numeric' })
+    .formatToParts(new Date()).map((x) => [x.type, Number(x.value)]));
+  const dias = Math.round((Date.UTC(hoy.year, 11, 25) - Date.UTC(hoy.year, hoy.month - 1, hoy.day)) / 864e5);
+  if (dias < 0 || dias > 75) return null;
+  if (dias === 0) return '¡Feliz Navidad! Gracias por llenar tu casa de luz';
+  if (dias === 1) return 'Mañana es Navidad';
+  return `Faltan ${dias} días para Navidad · pide con tiempo`;
+})();
 
 const { data: recordatoriosRaw, error: recordatoriosError } = await supabase
   .from('recordatorios')
@@ -53,7 +97,7 @@ const recs = (recordatoriosRaw ?? []).map((r) => ({
     .map((o) => [o.descripcion, copPlain(o.precio_unidad), copPlain(o.precio_mayor)]),
 }));
 
-const siteData = { productos, recs };
+const siteData = { productos, recs, lineName, temaDe, filtroInicial };
 
 // Tres piezas insignia para los pedestales de la Colección Destacada.
 // Se eligen por nombre; si la dueña las renombra o desactiva en /admin,
@@ -175,6 +219,116 @@ const campoFrente = [
 // Si `s` no termina en "…px)", se pide 300px, que cubre cualquier pieza.
 const anchoMax = (s: string) => parseInt(s.match(/(\d+)px\)$/)?.[1] ?? '300', 10);
 
+// ===================== DECORADO NAVIDEÑO (styles/tema-navidad.css) =====================
+// Se dibuja una sola vez en el servidor y solo si alguna línea visible tiene
+// la ambientación: queda escondido hasta que el cliente elige esa línea.
+type Pt = [number, number];
+// Curva cuadrática: punto y ángulo de la tangente en t (0…1)
+const qPunto = (a: Pt, c: Pt, b: Pt, t: number): Pt => [
+  (1 - t) ** 2 * a[0] + 2 * (1 - t) * t * c[0] + t * t * b[0],
+  (1 - t) ** 2 * a[1] + 2 * (1 - t) * t * c[1] + t * t * b[1],
+];
+const qAngulo = (a: Pt, c: Pt, b: Pt, t: number) => Math.atan2(
+  2 * (1 - t) * (c[1] - a[1]) + 2 * t * (b[1] - c[1]),
+  2 * (1 - t) * (c[0] - a[0]) + 2 * t * (b[0] - c[0]),
+);
+// Azar con semilla: el mismo pino en cada visita (y en servidor y en caché).
+const azar = (s: number) => () => ((s = (s * 16807) % 2147483647) - 1) / 2147483646;
+const f1 = (n: number) => n.toFixed(1);
+
+// Guirnalda: 6 caídas de cable dorado en 1440 de ancho, 4 focos por caída.
+// El SVG usa "slice": en móvil recorta los lados en vez de aplastar los focos.
+const guirnalda = (() => {
+  const y = 6, caida = 48, tramos = 6, ancho = 1440 / tramos;
+  const colores = ['oro', 'rojo', 'verde', 'blanco'];
+  let cable = `M0 ${y}`;
+  const focos: { x: string; y: string; giro: string; color: string; i: number; d: string }[] = [];
+  for (let k = 0; k < tramos; k++) {
+    const a: Pt = [k * ancho, y], c: Pt = [k * ancho + ancho / 2, y + 2 * caida], b: Pt = [(k + 1) * ancho, y];
+    cable += ` Q${c[0]} ${c[1]} ${b[0]} ${b[1]}`;
+    for (const t of [0.17, 0.39, 0.61, 0.83]) {
+      const [px, py] = qPunto(a, c, b, t);
+      const i = focos.length;
+      focos.push({
+        x: f1(px), y: f1(py),
+        giro: f1(qAngulo(a, c, b, t) * 180 / Math.PI * 0.35),   // cuelgan casi rectos
+        color: colores[i % colores.length], i,
+        d: (((i * 7) % 11) / 11 * 2.6).toFixed(2),              // titileo desfasado
+      });
+    }
+  }
+  return { cable, focos, colores };
+})();
+
+// Rama de pino escarchada: tallos curvos con agujas a ambos lados que se
+// acortan hacia la punta. Tres verdes + puntas de escarcha.
+const ramaPino = (() => {
+  const r = azar(11);
+  const agujas = ['', '', ''];
+  let escarcha = '', tallos = '';
+  const ramas: [Pt, Pt, Pt, number][] = [
+    [[0, 14], [112, 10], [262, 92], 23],     // principal, cae hacia la derecha
+    [[96, 25], [130, 46], [150, 118], 15],   // brote que cuelga
+    [[150, 41], [196, 38], [236, 20], 12],   // brote que sube
+  ];
+  for (const [a, c, b, largo] of ramas) {
+    tallos += `M${a} Q${c} ${b}`;
+    for (let t = 0.03; t <= 1.0001; t += 0.032) {
+      const [x, y] = qPunto(a, c, b, t);
+      const th = qAngulo(a, c, b, t);
+      const L = largo * (1 - 0.5 * t) * (0.82 + r() * 0.32);
+      for (const lado of [-1, 1]) {
+        const ang = th + lado * (0.82 + r() * 0.3);
+        const x2 = x + Math.cos(ang) * L, y2 = y + Math.sin(ang) * L;
+        agujas[Math.floor(r() * 3)] += `M${f1(x)} ${f1(y)}L${f1(x2)} ${f1(y2)}`;
+        if (r() < 0.24) escarcha += `M${f1(x + Math.cos(ang) * L * 0.7)} ${f1(y + Math.sin(ang) * L * 0.7)}L${f1(x2)} ${f1(y2)}`;
+      }
+    }
+  }
+  return { agujas, escarcha, tallos };
+})();
+
+// Esferas que cuelgan del borde superior (a la derecha, donde no hay texto).
+// x = distancia al borde derecho; largo = hilo en px; tier b = solo escritorio.
+const coloresEsfera: Record<string, { luz: string; base: string; sombra: string; banda: string }> = {
+  rojo:  { luz: '#F59AA0', base: '#B8323D', sombra: '#560E17', banda: '#E9CF7A' },
+  oro:   { luz: '#FFF4CF', base: '#D2AC58', sombra: '#6E4A10', banda: '#8C6318' },
+  verde: { luz: '#A3DBB2', base: '#2F7A4C', sombra: '#0F2E1D', banda: '#E9CF7A' },
+  crema: { luz: '#FFFFFF', base: '#F1E3CF', sombra: '#A88D6B', banda: '#C49A45' },
+};
+const esferas = [
+  { tipo: 'bola',     color: 'rojo',  x: '2.6%',  largo: 78,  tam: 46, mecer: 4.6 },
+  { tipo: 'estrella', color: 'oro',   x: '9.4%',  largo: 30,  tam: 36, mecer: 5.5 },
+  { tipo: 'gota',     color: 'verde', x: '14.6%', largo: 104, tam: 28, mecer: 6.2, tier: 'b' },
+  { tipo: 'bola',     color: 'crema', x: '20.5%', largo: 52,  tam: 32, mecer: 5.1, tier: 'b' },
+].map((e, i) => ({ ...e, i, svg: esferaSVG(e.tipo, coloresEsfera[e.color], `esf${i}`) }));
+
+function esferaSVG(tipo: string, c: { luz: string; base: string; sombra: string; banda: string }, id: string) {
+  const brillo = `<radialGradient id="${id}g" cx="34%" cy="38%" r="72%"><stop offset="0" stop-color="${c.luz}"/><stop offset=".5" stop-color="${c.base}"/><stop offset="1" stop-color="${c.sombra}"/></radialGradient>`;
+  const metal = `<linearGradient id="${id}k" x1="0" x2="1"><stop offset="0" stop-color="#8C6318"/><stop offset=".5" stop-color="#F6E7B4"/><stop offset="1" stop-color="#8C6318"/></linearGradient>`;
+  const casquillo = `<path d="M17.5 4a2.5 2.5 0 0 1 5 0" fill="none" stroke="#C49A45" stroke-width="1.4"/><rect x="14.5" y="4" width="11" height="7" rx="1.6" fill="url(#${id}k)"/>`;
+  if (tipo === 'estrella') {
+    const pts = Array.from({ length: 10 }, (_, k) => {
+      const ang = -Math.PI / 2 + k * Math.PI / 5, rad = k % 2 ? 8.2 : 19;
+      return `${f1(20 + Math.cos(ang) * rad)},${f1(25 + Math.sin(ang) * rad)}`;
+    }).join(' ');
+    return `<svg viewBox="0 0 40 46" aria-hidden="true" focusable="false"><defs>${metal}<linearGradient id="${id}e" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#FFF4CF"/><stop offset=".45" stop-color="#E2BE68"/><stop offset="1" stop-color="#8C6318"/></linearGradient></defs><path d="M17.5 2.5a2.5 2.5 0 0 1 5 0" fill="none" stroke="#C49A45" stroke-width="1.4"/><polygon points="${pts}" fill="url(#${id}e)" stroke="#F6E7B4" stroke-width=".8" stroke-linejoin="round"/><circle cx="16" cy="20" r="2.2" fill="#fff" opacity=".55"/></svg>`;
+  }
+  if (tipo === 'gota') {
+    return `<svg viewBox="0 0 40 72" aria-hidden="true" focusable="false"><defs>${brillo}${metal}</defs>${casquillo}<path d="M20 11C31 19 35 31 30 43 27 51 22 57 20 70 18 57 13 51 10 43 5 31 9 19 20 11Z" fill="url(#${id}g)"/><path d="M8.5 33C14 37 26 37 31.5 33" fill="none" stroke="${c.banda}" stroke-width="1.8" opacity=".8"/><ellipse cx="14" cy="27" rx="2.6" ry="7" fill="#fff" opacity=".38" transform="rotate(18 14 27)"/></svg>`;
+  }
+  return `<svg viewBox="0 0 40 50" aria-hidden="true" focusable="false"><defs>${brillo}${metal}</defs>${casquillo}<circle cx="20" cy="30" r="18.5" fill="url(#${id}g)"/><path d="M2.4 27C10 32.5 30 32.5 37.6 27" fill="none" stroke="${c.banda}" stroke-width="2" opacity=".7"/><path d="M2.9 33.5C10 39 30 39 37.1 33.5" fill="none" stroke="${c.banda}" stroke-width="1.2" opacity=".55"/><ellipse cx="13" cy="22" rx="3.6" ry="6.4" fill="#fff" opacity=".42" transform="rotate(32 13 22)"/></svg>`;
+}
+
+// Estrellas que titilan dentro del arco que da paso a la colección (el arco
+// se vuelve cielo nocturno). Coordenadas en % de la franja de transición.
+const estrellasArco = [
+  { x: 31, y: 72, s: 9, d: 0 }, { x: 42, y: 58, s: 6, d: 1.1 }, { x: 50, y: 80, s: 11, d: 2.2 },
+  { x: 57, y: 63, s: 7, d: .6 }, { x: 68, y: 76, s: 8, d: 1.7 }, { x: 37, y: 88, s: 5, d: 2.8 },
+  { x: 62, y: 90, s: 6, d: .3 }, { x: 24, y: 86, s: 6, d: 1.4 }, { x: 76, y: 88, s: 5, d: 2.5 },
+];
+// =============================================================================
+
 // El catálogo, para resultados enriquecidos de producto. Sin URL propia por
 // pieza (todo vive en /#coleccion), así que todas apuntan a la misma página:
 // sigue siendo válido para Google.
@@ -202,7 +356,7 @@ const catalogoLD = jsonLD({
 });
 ---
 <!doctype html>
-<html lang="es">
+<html lang="es" data-linea-tema={temaInicial ?? undefined}>
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -435,24 +589,86 @@ const catalogoLD = jsonLD({
   <!-- 6 · transición malva → nude ------------------------------------- -->
   <div class="transicion a-lienzo" aria-hidden="true">
     <svg class="arco-svg" viewBox="0 0 1440 160" preserveAspectRatio="none"><path d="M0 160V96C240 20 480 0 720 0s480 20 720 96v64Z" fill="#F3E8E6"/></svg>
+    {hayNavidad && (
+      <div class="tema-estrellas">
+        {estrellasArco.map((s) => <i style={`--x:${s.x}%; --y:${s.y}%; --s:${s.s}px; --d:${s.d}s`}></i>)}
+      </div>
+    )}
   </div>
 
   <!-- 7 · LA COLECCIÓN (lienzo) --------------------------------------- -->
   <section id="coleccion" class="section amb-lienzo" aria-labelledby="coleccion-title">
+    <!-- Escena navideña: noche de pino, nieve, luces y esferas. Va detrás del
+         contenido (.wrap) e invisible hasta que html[data-linea-tema="navidad"]. -->
+    {hayNavidad && (
+      <div class="tema-escena" aria-hidden="true">
+        <canvas class="tema-nieve" id="nieve"></canvas>
+        <svg class="tema-rama izq" viewBox="-6 -16 286 150" focusable="false">
+          <path class="tallo" d={ramaPino.tallos} />
+          {ramaPino.agujas.map((d, k) => <path class={`aguja a${k}`} d={d} />)}
+          <path class="escarcha" d={ramaPino.escarcha} />
+          <g class="bayas"><circle cx="34" cy="30" r="5.6" /><circle cx="44.5" cy="25" r="5" /><circle cx="42" cy="37" r="4.6" /></g>
+        </svg>
+        <svg class="tema-rama der" viewBox="-6 -16 286 150" focusable="false">
+          <path class="tallo" d={ramaPino.tallos} />
+          {ramaPino.agujas.map((d, k) => <path class={`aguja a${k}`} d={d} />)}
+          <path class="escarcha" d={ramaPino.escarcha} />
+          <g class="bayas"><circle cx="34" cy="30" r="5.6" /><circle cx="44.5" cy="25" r="5" /><circle cx="42" cy="37" r="4.6" /></g>
+        </svg>
+        <svg class="tema-guirnalda" viewBox="0 0 1440 120" preserveAspectRatio="xMidYMin slice" focusable="false">
+          <defs>
+            {guirnalda.colores.map((c) => (
+              <radialGradient id={`halo-${c}`}><stop offset="0" class={`halo-${c}`} stop-opacity=".9" /><stop offset="1" class={`halo-${c}`} stop-opacity="0" /></radialGradient>
+            ))}
+          </defs>
+          <path class="cable" d={guirnalda.cable} />
+          {guirnalda.focos.map((f) => (
+            <g class={`foco f-${f.color}`} transform={`translate(${f.x} ${f.y}) rotate(${f.giro})`} style={`--i:${f.i}; --d:${f.d}s`}>
+              <g class="luz"><circle class="halo" cy="14" r="17" fill={`url(#halo-${f.color})`} /></g>
+              <rect class="casquillo" x="-3" y="-1" width="6" height="6.5" rx="1.2" />
+              <path class="bombillo" d="M-3 5C-7 8.5-6.6 14-2.3 19.6Q0 22.6 2.3 19.6C6.6 14 7 8.5 3 5Z" />
+              <ellipse class="reflejo" cx="-1.9" cy="11" rx="1.2" ry="2.8" />
+            </g>
+          ))}
+        </svg>
+        {esferas.map((e) => (
+          <span class={`esfera esfera-${e.tipo}`} data-tier={e.tier} style={`--x:${e.x}; --largo:${e.largo}px; --tam:${e.tam}px; --i:${e.i}; --mecer:${e.mecer}s`}>
+            <span class="esfera-cuerpo" set:html={e.svg} />
+          </span>
+        ))}
+        <svg class="tema-ventisquero" viewBox="0 0 1440 110" preserveAspectRatio="none" focusable="false">
+          <defs>
+            <linearGradient id="nieveFrente" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#FFFFFF" /><stop offset=".55" stop-color="#F3E8E6" /></linearGradient>
+          </defs>
+          <path class="atras" d="M0 110V58C90 34 170 30 260 48S420 70 520 44 700 14 820 36 1000 72 1120 50 1330 22 1440 40V110Z" />
+          <path d="M0 110V72C120 52 220 60 330 70S520 82 640 62 840 40 960 58 1160 86 1280 70 1400 56 1440 60V110Z" fill="url(#nieveFrente)" />
+        </svg>
+      </div>
+    )}
     <div class="wrap">
-      <div class="section-head reveal">
-        <span class="eyebrow">Catálogo</span>
-        <h2 id="coleccion-title" class="display">La <span class="gold">colección</span></h2>
-        <p>Cada pieza se hace por encargo con la fragancia y el color que elijas. Precios en pesos colombianos.</p>
+      <!-- Las cabeceras se apilan en la misma celda: cambiar de ambientación
+           cruza los textos sin mover la barra de filtros de lugar. -->
+      <div class="section-head cabecera-coleccion reveal">
+        <div class="cab cab-base" data-cab="base" inert={temaInicial ? true : undefined} aria-hidden={temaInicial ? 'true' : undefined}>
+          <span class="eyebrow">Catálogo</span>
+          <h2 id="coleccion-title" class="display">La <span class="gold">colección</span></h2>
+          <p>Cada pieza se hace por encargo con la fragancia y el color que elijas. Precios en pesos colombianos.</p>
+        </div>
+        {temasUsados.map((clave) => (
+          <div class={`cab cab-${clave}`} data-cab={clave} inert={temaInicial !== clave ? true : undefined} aria-hidden={temaInicial !== clave ? 'true' : undefined}>
+            <span class="eyebrow">{TEMAS[clave].eyebrow}</span>
+            <h2 class="display">{TEMAS[clave].titulo} <span class="gold">{TEMAS[clave].destacado}</span></h2>
+            <p>{TEMAS[clave].texto}</p>
+          </div>
+        ))}
       </div>
       <div class="toolbar reveal">
         <div class="filters-wrap">
           <div class="filters" role="group" aria-label="Filtrar por línea">
-            <button class="chip" data-filter="todas" aria-pressed="true">Todas</button>
-            <button class="chip" data-filter="flores" aria-pressed="false">Flores</button>
-            <button class="chip" data-filter="botanica" aria-pressed="false">Botánica</button>
-            <button class="chip" data-filter="figuras" aria-pressed="false">Figuras</button>
-            <button class="chip" data-filter="recipientes" aria-pressed="false">Recipientes</button>
+            <button type="button" class="chip" data-filter="todas" aria-pressed={filtroInicial === 'todas' ? 'true' : 'false'}>Todas</button>
+            {lineas.map((l) => (
+              <button type="button" class="chip" data-filter={l.slug} data-tema={l.tema ?? undefined} aria-pressed={filtroInicial === l.slug ? 'true' : 'false'}>{l.nombre}</button>
+            ))}
           </div>
         </div>
         <div class="tools">
@@ -465,7 +681,15 @@ const catalogoLD = jsonLD({
           </button>
         </div>
       </div>
-      <p class="count" id="count" aria-live="polite">{productos.length} piezas</p>
+      <div class="conteo-fila">
+        <p class="count" id="count" aria-live="polite">{conteoInicial}</p>
+        {cuentaNavidad && (
+          <p class="cuenta-navidad">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><g fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 12V2.5M9 5l3 3 3-3" /><path d="M12 12V2.5M9 5l3 3 3-3" transform="rotate(60 12 12)" /><path d="M12 12V2.5M9 5l3 3 3-3" transform="rotate(120 12 12)" /><path d="M12 12V2.5M9 5l3 3 3-3" transform="rotate(180 12 12)" /><path d="M12 12V2.5M9 5l3 3 3-3" transform="rotate(240 12 12)" /><path d="M12 12V2.5M9 5l3 3 3-3" transform="rotate(300 12 12)" /></g></svg>
+            {cuentaNavidad}
+          </p>
+        )}
+      </div>
       <!-- Renderizado en el servidor (antes solo lo pintaba el script del
            cliente): Google y cualquier cosa que no ejecute JS ahora sí ven
            el catálogo completo en el HTML. El script de más abajo sigue
@@ -473,12 +697,12 @@ const catalogoLD = jsonLD({
            pintar él mismo (con favoritos, filtro y orden ya aplicados);
            esto es solo el primer pintado. -->
       <div class="products" id="products">
-        {productos.map((x, i) => (
+        {productosIniciales.map((x, i) => (
           <article class="card" data-line={x.line} data-id={x.id} style={`animation-delay:${Math.min(i, 10) * 50}ms`}>
             <div class="photo">
               <img src={x.img} alt={`${x.n}: ${x.mat}`} width="400" height="500" loading="lazy" decoding="async">
               <button type="button" class="qv-trigger" data-id={x.id} aria-label={`Ver detalle de ${x.n}`}></button>
-              <span class="tag" data-line={x.line}>{lineName[x.line]}</span>
+              <span class="tag" data-line={x.line} data-tema={temaDe[x.line] ?? undefined}>{lineName[x.line]}</span>
               <button type="button" class="fav-btn" data-id={x.id} aria-pressed="false" aria-label="Guardar en favoritos">
                 <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 21s-7.5-4.6-10.2-9.1C.1 8.9 1 5.4 4.2 4.2 6.5 3.3 9 4 12 6.8 15 4 17.5 3.3 19.8 4.2c3.2 1.2 4.1 4.7 2.4 7.7C19.5 16.4 12 21 12 21Z"/></svg>
               </button>
@@ -760,26 +984,29 @@ const catalogoLD = jsonLD({
   menu.addEventListener('keydown', (e) => { if (menu.classList.contains('open')) atrapar(menu, e); });
 
   const productos = siteData.productos;
-  const lineName = { flores: 'Flores', botanica: 'Botánica', figuras: 'Figuras', recipientes: 'Recipientes' };
+  // Nombre y ambientación de cada línea: vienen del panel admin (tabla `lineas`).
+  const lineName = siteData.lineName;
+  const temaDe = siteData.temaDe;
   const byId = Object.fromEntries(productos.map((x) => [x.id, x]));
+  const atrTema = (line) => (temaDe[line] ? ` data-tema="${esc(temaDe[line])}"` : '');
   const priceNum = (p) => parseInt(p.replace(/[^\d]/g, ''), 10) || 0;
 
   let favs = new Set();
   try { favs = new Set(JSON.parse(localStorage.getItem('yeska-favs') || '[]')); } catch (e) {}
   const saveFavs = () => { try { localStorage.setItem('yeska-favs', JSON.stringify([...favs])); } catch (e) {} };
 
-  const state = { filter: 'todas', query: '', sort: 'default' };
+  const state = { filter: siteData.filtroInicial, query: '', sort: 'default' };
   const grid = document.getElementById('products');
   const countEl = document.getElementById('count');
 
   function cardHTML(x, i) {
     const fav = favs.has(x.id);
     return `
-    <article class="card" data-line="${x.line}" data-id="${x.id}" style="animation-delay:${Math.min(i, 10) * 50}ms">
+    <article class="card" data-line="${esc(x.line)}" data-id="${x.id}" style="animation-delay:${Math.min(i, 10) * 50}ms">
       <div class="photo">
         <img src="${esc(x.img)}" alt="${esc(x.n)}: ${esc(x.mat)}" width="400" height="500" loading="lazy" decoding="async">
         <button type="button" class="qv-trigger" data-id="${x.id}" aria-label="Ver detalle de ${esc(x.n)}"></button>
-        <span class="tag" data-line="${x.line}">${lineName[x.line]}</span>
+        <span class="tag" data-line="${esc(x.line)}"${atrTema(x.line)}>${esc(lineName[x.line])}</span>
         <button type="button" class="fav-btn" data-id="${x.id}" aria-pressed="${fav}" aria-label="${fav ? 'Quitar de favoritos' : 'Guardar en favoritos'}">
           <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 21s-7.5-4.6-10.2-9.1C.1 8.9 1 5.4 4.2 4.2 6.5 3.3 9 4 12 6.8 15 4 17.5 3.3 19.8 4.2c3.2 1.2 4.1 4.7 2.4 7.7C19.5 16.4 12 21 12 21Z"/></svg>
         </button>
@@ -807,19 +1034,45 @@ const catalogoLD = jsonLD({
       </div>`;
     const clear = document.getElementById('clearFilters');
     if (clear) clear.addEventListener('click', () => {
-      state.filter = 'todas'; state.query = ''; setSort('default');
+      state.query = ''; setSort('default');
       document.getElementById('buscador').value = '';
-      chips.forEach((c) => c.setAttribute('aria-pressed', String(c.dataset.filter === 'todas')));
-      render();
+      setFiltro('todas');
     });
   }
 
+  // ---------- ambientación de la línea elegida (p. ej. Navidad) ----------
+  // Todo el decorado cuelga de un atributo en <html>; aquí solo se cambia
+  // ese atributo y qué cabecera de la colección está activa.
+  const raiz = document.documentElement;
+  const cabeceras = [...document.querySelectorAll('[data-cab]')];
+  const alCambiarTema = [];
+  function aplicarTema(tema) {
+    tema = tema || '';
+    if (tema === (raiz.dataset.lineaTema || '')) return;
+    if (tema) raiz.dataset.lineaTema = tema; else delete raiz.dataset.lineaTema;
+    cabeceras.forEach((c) => {
+      const activa = c.dataset.cab === (tema || 'base');
+      c.toggleAttribute('inert', !activa);
+      if (activa) c.removeAttribute('aria-hidden'); else c.setAttribute('aria-hidden', 'true');
+    });
+    alCambiarTema.forEach((fn) => fn(tema));
+  }
+
   const chips = document.querySelectorAll('.chip');
-  chips.forEach((ch) => ch.addEventListener('click', () => {
-    state.filter = ch.dataset.filter;
-    chips.forEach((c) => c.setAttribute('aria-pressed', String(c === ch)));
+  function setFiltro(f) {
+    state.filter = f;
+    chips.forEach((c) => c.setAttribute('aria-pressed', String(c.dataset.filter === f)));
+    aplicarTema(f === 'todas' ? '' : temaDe[f]);
+    // La URL sigue al filtro (sin recargar): copiarla comparte la línea tal cual.
+    try {
+      const u = new URL(location.href);
+      if (f === 'todas') u.searchParams.delete('linea'); else u.searchParams.set('linea', f);
+      history.replaceState(history.state, '', u);
+    } catch (e) {}
     render();
-  }));
+    asomarChip();
+  }
+  chips.forEach((ch) => ch.addEventListener('click', () => setFiltro(ch.dataset.filter)));
 
   // Los chips ya no se envuelven en dos filas: si no caben, la tira se
   // desplaza. El táctil ya sabe deslizar solo; esto le da lo mismo al mouse
@@ -852,6 +1105,16 @@ const catalogoLD = jsonLD({
       arrastrando = false; filtros.classList.remove('arrastrando');
     }, true);
   }
+  // El chip activo siempre a la vista dentro de la tira: si se entró con un
+  // enlace /?linea=navidad en el celular, podía quedar cortado al borde.
+  function asomarChip() {
+    const c = filtros && filtros.querySelector('.chip[aria-pressed="true"]');
+    if (!c) return;
+    const r = c.getBoundingClientRect(), f = filtros.getBoundingClientRect();
+    if (r.right > f.right - 30) filtros.scrollLeft += r.right - (f.right - 30);
+    else if (r.left < f.left) filtros.scrollLeft -= f.left - r.left + 4;
+  }
+  if (state.filter !== 'todas') asomarChip();
   let searchTimer;
   document.getElementById('buscador').addEventListener('input', (e) => {
     clearTimeout(searchTimer);
@@ -925,10 +1188,11 @@ const catalogoLD = jsonLD({
     qvBody.innerHTML = `
       <img src="${esc(x.img)}" alt="${esc(x.n)}: ${esc(x.mat)}" width="500" height="625">
       <div class="qv-info">
-        <span class="tag" data-line="${x.line}">${lineName[x.line]}</span>
+        <span class="tag" data-line="${esc(x.line)}"${atrTema(x.line)}>${esc(lineName[x.line])}</span>
         <h3>${esc(x.n)}</h3>
         <p class="mat">${esc(x.mat)}</p>
         <div class="price">${x.p}${x.note ? `<small>${esc(x.note)}</small>` : ''}</div>
+        ${temaDe[x.line] === 'navidad' ? '<p class="qv-temporada">Pieza de temporada: se hace por encargo, así que conviene pedirla con tiempo para que llegue antes de Navidad.</p>' : ''}
         <div class="ctas">
           <a class="btn btn-oro" href="${pedir(x.n)}" target="_blank" rel="noopener">Pedir por WhatsApp</a>
           <button type="button" class="btn btn-line qv-fav" data-id="${x.id}">${favs.has(x.id) ? 'Quitar de favoritos' : 'Guardar en favoritos'}</button>
@@ -1101,6 +1365,85 @@ const catalogoLD = jsonLD({
       requestAnimationFrame(tick);
     };
     tick();
+  }
+
+  // ---------- nieve de la ambientación navideña ----------
+  // Un canvas del alto de la ventana, "sticky" dentro de la colección (ver
+  // tema-navidad.css): nieva detrás de las tarjetas mientras se recorre la
+  // sección, sin un lienzo gigante del alto de toda la grilla. Solo corre si
+  // la línea navideña está elegida, la sección está a la vista y la pestaña
+  // está activa; con movimiento reducido no corre nunca.
+  const nieveCv = document.getElementById('nieve');
+  if (nieveCv && !reduce) {
+    const ctx = nieveCv.getContext('2d');
+    const seccion = document.getElementById('coleccion');
+    const dpr = Math.min(devicePixelRatio || 1, 2);
+    const N = window.innerWidth < 768 ? 42 : 90;
+    let W = 0, H = 0, copos = [], aLaVista = false, corriendo = false, previo = 0;
+    const medir = () => {
+      const r = nieveCv.getBoundingClientRect();
+      W = nieveCv.width = Math.max(1, Math.round(r.width * dpr));
+      H = nieveCv.height = Math.max(1, Math.round(r.height * dpr));
+    };
+    // Muchos copos chicos y lejanos, pocos grandes y cercanos (caen más rápido),
+    // y uno de cada diez es un cristal de seis brazos que gira despacio.
+    const copo = (arriba) => {
+      const cristal = Math.random() < 0.1;
+      const r = cristal ? 5 + Math.random() * 6 : 0.7 + Math.random() ** 2.2 * 3;
+      return {
+        x: Math.random() * W, y: arriba ? -16 * dpr : Math.random() * H, r: r * dpr, cristal,
+        vy: (0.22 + r * 0.13 + Math.random() * 0.22) * dpr,
+        fase: Math.random() * 6.28, vaiven: (0.25 + Math.random() * 0.6) * dpr,
+        a: cristal ? 0.55 + Math.random() * 0.3 : 0.3 + Math.random() * 0.6,
+        giro: Math.random() * 6.28, vg: (Math.random() - 0.5) * 0.012,
+      };
+    };
+    const cristal = (c) => {
+      ctx.save(); ctx.translate(c.x, c.y); ctx.rotate(c.giro);
+      ctx.strokeStyle = `rgba(255,255,255,${c.a.toFixed(2)})`;
+      ctx.lineWidth = 1.1 * dpr; ctx.lineCap = 'round';
+      ctx.beginPath();
+      for (let k = 0; k < 6; k++) {
+        ctx.rotate(Math.PI / 3);
+        ctx.moveTo(0, 0); ctx.lineTo(0, -c.r);
+        ctx.moveTo(0, -c.r * 0.55); ctx.lineTo(c.r * 0.3, -c.r * 0.82);
+        ctx.moveTo(0, -c.r * 0.55); ctx.lineTo(-c.r * 0.3, -c.r * 0.82);
+      }
+      ctx.stroke(); ctx.restore();
+    };
+    const cuadro = (t) => {
+      if (!corriendo) return;
+      const dt = previo ? Math.min(3, (t - previo) / 16.67) : 1; previo = t;
+      ctx.clearRect(0, 0, W, H);
+      for (const c of copos) {
+        c.fase += 0.011 * dt;
+        c.y += c.vy * dt;
+        c.x += Math.sin(c.fase) * c.vaiven * 0.6 * dt;
+        c.giro += c.vg * dt;
+        if (c.y - c.r > H) Object.assign(c, copo(true));
+        if (c.x < -20 * dpr) c.x = W + 10 * dpr; else if (c.x > W + 20 * dpr) c.x = -10 * dpr;
+        if (c.cristal) { cristal(c); continue; }
+        if (c.r > 2.4 * dpr) {   // los copos cercanos llevan un halo apenas visible
+          ctx.beginPath(); ctx.arc(c.x, c.y, c.r * 1.7, 0, 6.2832);
+          ctx.fillStyle = `rgba(255,255,255,${(c.a * 0.09).toFixed(3)})`; ctx.fill();
+        }
+        ctx.beginPath(); ctx.arc(c.x, c.y, c.r, 0, 6.2832);
+        ctx.fillStyle = `rgba(255,255,255,${c.a.toFixed(2)})`; ctx.fill();
+      }
+      requestAnimationFrame(cuadro);
+    };
+    const decidir = () => {
+      const debe = raiz.dataset.lineaTema === 'navidad' && aLaVista && !document.hidden;
+      if (debe && !corriendo) {
+        if (!W) medir();
+        if (!copos.length) for (let i = 0; i < N; i++) copos.push(copo(false));
+        corriendo = true; previo = 0; requestAnimationFrame(cuadro);
+      } else if (!debe) corriendo = false;
+    };
+    new IntersectionObserver(([e]) => { aLaVista = e.isIntersecting; decidir(); }).observe(seccion);
+    document.addEventListener('visibilitychange', decidir);
+    alCambiarTema.push(decidir);
+    window.addEventListener('resize', () => { if (W) medir(); }, { passive: true });
   }
 </script>
 </body>

@@ -12,9 +12,11 @@ create extension if not exists "pgcrypto";
 -- ------------------------------------------------------------
 create table lineas (
   id          uuid primary key default gen_random_uuid(),
-  slug        text not null unique,        -- 'flores', 'botanica'...
+  slug        text not null unique,        -- 'flores', 'botanica'... (enlace /?linea=slug)
   nombre      text not null,               -- 'Flores', 'Botánica'...
   orden       int  not null default 0,
+  tema        text,                        -- ambientación: null | 'navidad' (src/lib/temas.js)
+  activo      boolean not null default true,  -- ocultar una línea de temporada sin borrarla
   creado_en   timestamptz not null default now()
 );
 

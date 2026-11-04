@@ -603,23 +603,22 @@ section { scroll-margin-top: var(--nav-h); }
 /* Los chips ya no se envuelven en dos filas: si no caben en el ancho
    disponible, la tira se desplaza en horizontal (dedo, rueda del mouse o
    arrastre — script al final del body) en vez de romperse en bloque. El
-   degradado del ::after avisa que hay más para el lado derecho. */
+   desvanecido del borde derecho avisa que hay más. Es una máscara y no un
+   degradado pintado del color del fondo: así sirve igual sobre el nude que
+   sobre la noche de la ambientación navideña. */
 .filters-wrap { position: relative; min-width: 0; }
 .filters {
   display: flex; flex-wrap: nowrap; gap: 8px; min-width: 0;
   overflow-x: auto; overscroll-behavior-x: contain; scroll-snap-type: x proximity;
-  padding: 2px 20px 2px 2px; margin-right: -20px;
+  padding: 4px 20px 4px 4px; margin: -2px -20px -2px -2px;
   cursor: grab; -webkit-overflow-scrolling: touch;
   scrollbar-width: none; -ms-overflow-style: none;
+  -webkit-mask-image: linear-gradient(to right, #000 calc(100% - 30px), transparent);
+  mask-image: linear-gradient(to right, #000 calc(100% - 30px), transparent);
 }
 .filters::-webkit-scrollbar { display: none; }
 .filters.arrastrando { cursor: grabbing; scroll-behavior: auto; }
 .filters.arrastrando .chip { pointer-events: none; }
-.filters-wrap::after {
-  content: ""; position: absolute; top: 0; right: 0; bottom: 0; width: 28px;
-  background: linear-gradient(to right, transparent, var(--nude));
-  pointer-events: none;
-}
 /* Pestañas de borde dorado — el mismo dorado sutil que ya usa el anillo del
    botón de orden (§sort-btn): relleno tenue + anillo cuando está activa. */
 .chip {

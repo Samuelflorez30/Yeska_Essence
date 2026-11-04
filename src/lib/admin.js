@@ -59,6 +59,9 @@ export function mensajeError(err) {
   if (/failed to fetch|networkerror|load failed/i.test(m)) return 'Sin conexión con el servidor. Revisa tu internet e inténtalo de nuevo.';
   if (/jwt|token|not authorized|permission denied|row-level security/i.test(m)) return 'Tu sesión no tiene permiso para esto. Vuelve a ingresar.';
   if (/payload too large|maximum allowed size/i.test(m)) return 'La foto es demasiado grande.';
+  if (/foreign key/i.test(m)) return 'Esta línea todavía tiene productos. Pásalos a otra línea antes de eliminarla.';
+  if (/duplicate key|unique constraint/i.test(m)) return 'Ya existe una línea con ese nombre.';
+  if (/schema cache|column .* does not exist/i.test(m)) return 'Falta actualizar la base de datos (supabase-migracion-lineas.sql). Avísale a quien mantiene la página.';
   return m || 'Algo salió mal. Inténtalo de nuevo.';
 }
 
@@ -87,6 +90,11 @@ async function exigirFilas({ data, error }) {
 export async function actualizar(tabla, id, cambios) {
   const [fila] = await exigirFilas(await supabase.from(tabla).update(cambios).eq('id', id).select());
   return fila;
+}
+
+/** Mismo cambio para varias filas a la vez (p. ej. pasar productos a otra línea). */
+export async function actualizarVarios(tabla, ids, cambios) {
+  return exigirFilas(await supabase.from(tabla).update(cambios).in('id', ids).select('id'));
 }
 
 export async function eliminar(tabla, id) {

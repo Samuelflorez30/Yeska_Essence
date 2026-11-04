@@ -1,0 +1,521 @@
+---
+import AdminLayout from '../../layouts/AdminLayout.astro';
+import { TEMAS } from '../../lib/temas.js';
+
+const temas = Object.entries(TEMAS).map(([clave, t]) => ({ clave, nombre: t.nombre, resumen: t.resumen }));
+---
+<AdminLayout title="Líneas" current="lineas">
+  <div class="page-head">
+    <div>
+      <span class="eyebrow">Catálogo</span>
+      <h1>Líneas</h1>
+      <p>Cada línea es un botón de filtro en la colección del sitio: Flores, Navidad, San Pedro… Haz clic en un nombre para cambiarlo y usa las flechas para ordenar los botones.</p>
+    </div>
+    <button class="btn btn-oro" id="btnNueva" type="button" aria-expanded="false" aria-controls="panelAlta">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>Nueva línea
+    </button>
+  </div>
+
+  <div class="aviso-paso" id="avisoMigracion" role="status" hidden>
+    <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 7.5v5.5M12 16.5v.01"/></svg>
+    <div>
+      <b>Falta un paso para activar las ambientaciones</b>
+      <p>Ya puedes crear, renombrar, ordenar y eliminar líneas. Para elegir una ambientación como Navidad u ocultar una línea, quien mantiene la página debe correr una vez el archivo <code>supabase-migracion-lineas.sql</code> en Supabase.</p>
+    </div>
+  </div>
+
+  <section class="tarjeta tarjeta-pad panel-alta" id="panelAlta" aria-labelledby="altaTitulo" hidden>
+    <div class="tarjeta-head"><h2 id="altaTitulo">Nueva línea</h2></div>
+    <form class="form-alta" id="formAlta" novalidate>
+      <div class="field c6">
+        <label for="n-nombre">Nombre</label>
+        <input id="n-nombre" maxlength="40" required autocomplete="off" placeholder="Ej: Navidad, San Pedro, Día de la Madre" aria-describedby="n-nombre-ayuda n-nombre-error">
+        <p class="ayuda" id="n-nombre-ayuda">Así se verá el botón en el sitio. Corto es mejor: una o dos palabras.</p>
+        <p class="msg-error" id="n-nombre-error" hidden></p>
+      </div>
+      <fieldset class="field c6 campo-tema" id="campoTema">
+        <legend class="field-label">Ambientación</legend>
+        <div class="opciones-tema">
+          <label class="opcion-tema">
+            <input type="radio" name="n-tema" value="" checked>
+            <span class="muestra muestra-base" aria-hidden="true"></span>
+            <span><b>Estilo de siempre</b><small>La colección se ve igual que con las demás líneas.</small></span>
+          </label>
+          {temas.map((t) => (
+            <label class="opcion-tema">
+              <input type="radio" name="n-tema" value={t.clave}>
+              <span class={`muestra muestra-${t.clave}`} aria-hidden="true"></span>
+              <span><b>{t.nombre}</b><small>{t.resumen}</small></span>
+            </label>
+          ))}
+        </div>
+      </fieldset>
+      <div class="form-alta-pie">
+        <p>Aparece en el sitio en cuanto tenga al menos un producto visible.</p>
+        <button class="btn btn-ghost" type="button" id="btnCancelar">Cancelar</button>
+        <button class="btn btn-oro" type="submit" id="btnGuardar">Crear línea</button>
+      </div>
+    </form>
+  </section>
+
+  <ol class="lineas" id="lista" aria-label="Líneas del catálogo" aria-busy="true">
+    <li class="tarjeta linea"><div class="esqueleto"></div></li>
+    <li class="tarjeta linea"><div class="esqueleto"></div></li>
+    <li class="tarjeta linea"><div class="esqueleto"></div></li>
+  </ol>
+
+  <!-- Traer productos de otras líneas a esta -->
+  <dialog class="dialogo dialogo-ancho" id="dlgTraer" aria-labelledby="traerTitulo" aria-describedby="traerTexto">
+    <div class="dialogo-cuerpo">
+      <h2 id="traerTitulo">Traer productos</h2>
+      <p id="traerTexto">Marca los productos que van en esta línea. Salen de la línea en la que están ahora; nada se borra.</p>
+      <div class="buscador">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3"/></svg>
+        <label class="sr-only" for="traerBuscar">Buscar producto</label>
+        <input class="control" id="traerBuscar" type="search" placeholder="Buscar por nombre" autocomplete="off">
+      </div>
+      <div class="lista-traer" id="traerLista"></div>
+      <p class="msg-error" id="traerError" role="alert" hidden></p>
+      <div class="acciones">
+        <button class="btn btn-line" type="button" id="traerCancelar">Cancelar</button>
+        <button class="btn btn-oro" type="button" id="traerOk" disabled>Mover productos</button>
+      </div>
+    </div>
+  </dialog>
+
+  <!-- Eliminar una línea que tiene productos: primero se mudan -->
+  <dialog class="dialogo" id="dlgEliminar" aria-labelledby="elimTitulo" aria-describedby="elimTexto">
+    <form method="dialog">
+      <span class="ico-peligro" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M3 6h18M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2m3 0-1 14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2L4 6"/></svg></span>
+      <h2 id="elimTitulo"></h2>
+      <p id="elimTexto"></p>
+      <div class="field">
+        <label for="elimDestino">Pasar sus productos a</label>
+        <select id="elimDestino"></select>
+      </div>
+      <div class="acciones">
+        <button class="btn btn-line" value="cancel" autofocus>Cancelar</button>
+        <button class="btn btn-danger" value="ok">Mover y eliminar</button>
+      </div>
+    </form>
+  </dialog>
+
+  <script>
+    import { supabase } from '../../lib/supabase.js';
+    import {
+      esc, toast, mensajeError, confirmar, actualizar, actualizarVarios, eliminar, insertar,
+      editarEnLinea, texto, errorDeCampo,
+    } from '../../lib/admin.js';
+    import { TEMAS, slugDe, mismoNombre } from '../../lib/temas.js';
+
+    type Linea = { id: string; slug: string; nombre: string; orden: number; tema?: string | null; activo?: boolean };
+    type Producto = { id: string; nombre: string; imagen_url: string | null; activo: boolean; linea_id: string; orden: number };
+    const TEMAS_: Record<string, { nombre: string }> = TEMAS;
+
+    const $ = <T extends HTMLElement = HTMLElement>(id: string) => document.getElementById(id) as T;
+    const lista = $('lista');
+    const params = new URLSearchParams(location.search);
+
+    let lineas: Linea[] = [];
+    let productos: Producto[] = [];
+    // false mientras la base de datos no tenga las columnas `tema` y `activo`
+    let migrado = true;
+
+    const deLinea = (id: string) => productos.filter((p) => p.linea_id === id);
+    const plural = (n: number, uno: string, varios: string) => `${n} ${n === 1 ? uno : varios}`;
+    const enlaceDe = (l: Linea) => `${location.origin}/?linea=${encodeURIComponent(l.slug)}#coleccion`;
+
+    /** Slug libre para un nombre: "navidad", y si ya existe, "navidad-2"… */
+    function slugUnico(nombre: string, exceptoId?: string) {
+      const base = slugDe(nombre);
+      const usados = new Set(lineas.filter((l) => l.id !== exceptoId).map((l) => l.slug));
+      let slug = base;
+      for (let n = 2; usados.has(slug); n++) slug = `${base}-${n}`;
+      return slug;
+    }
+
+    const ICONOS = {
+      subir: '<svg viewBox="0 0 24 24"><path d="m6 15 6-6 6 6"/></svg>',
+      bajar: '<svg viewBox="0 0 24 24"><path d="m6 9 6 6 6-6"/></svg>',
+      ver: '<svg viewBox="0 0 24 24"><path d="M14 4h6v6"/><path d="M20 4 11 13"/><path d="M18 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h5"/></svg>',
+      copiar: '<svg viewBox="0 0 24 24"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V5a1 1 0 0 1 1-1h10"/></svg>',
+      mas: '<svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>',
+      borrar: '<svg viewBox="0 0 24 24"><path d="M3 6h18M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2m3 0-1 14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2L4 6"/></svg>',
+    };
+
+    // ------------------------------------------------------------ carga ---
+    async function cargar() {
+      const [l, p, sonda] = await Promise.all([
+        supabase.from('lineas').select('*').order('orden').order('creado_en'),
+        supabase.from('productos').select('id, nombre, imagen_url, activo, linea_id, orden').order('orden'),
+        supabase.from('lineas').select('tema, activo').limit(1),
+      ]);
+      if (l.error || p.error) {
+        lista.innerHTML = `<li class="tarjeta"><div class="vacio">
+          <b>No se pudieron cargar las líneas</b><p>${esc(mensajeError(l.error ?? p.error))}</p>
+          <button class="btn btn-line" type="button" id="reintentar">Reintentar</button></div></li>`;
+        $('reintentar').addEventListener('click', cargar);
+        return;
+      }
+      migrado = !sonda.error;
+      $('avisoMigracion').hidden = migrado;
+      $('campoTema').hidden = !migrado;
+      lineas = (l.data ?? []) as Linea[];
+      productos = (p.data ?? []) as Producto[];
+      render();
+      if (params.get('nuevo') === '1') abrirAlta(true);
+    }
+
+    // ------------------------------------------------------------ lista ---
+    function filaHTML(l: Linea, i: number) {
+      const n = esc(l.nombre);
+      const ps = deLinea(l.id);
+      const ocultos = ps.filter((p) => !p.activo).length;
+      const visiblesEnSitio = ps.length - ocultos;
+      const activa = l.activo !== false;
+      const tema = l.tema && TEMAS_[l.tema] ? l.tema : '';
+      const aviso = !activa ? 'Línea oculta: no aparece en el sitio'
+        : !visiblesEnSitio ? 'No aparece en el sitio hasta que tenga un producto visible' : '';
+      return `
+      <li class="tarjeta linea ${activa ? '' : 'oculta'} ${tema ? `con-tema tema-${tema}` : ''}" data-id="${esc(l.id)}">
+        <div class="linea-orden">
+          <button type="button" class="btn-icon js-mover" data-dir="-1" aria-label="Subir ${n}" ${i === 0 ? 'disabled' : ''}>${ICONOS.subir}</button>
+          <button type="button" class="btn-icon js-mover" data-dir="1" aria-label="Bajar ${n}" ${i === lineas.length - 1 ? 'disabled' : ''}>${ICONOS.bajar}</button>
+        </div>
+        <div class="linea-principal">
+          <span class="editable e-nombre" data-campo="nombre" aria-label="Nombre de la línea"></span>
+          ${tema ? `<span class="insignia-tema">${esc(TEMAS_[tema].nombre)}</span>` : ''}
+          <span class="linea-enlaces">
+            <a class="js-ver" href="/?linea=${esc(l.slug)}#coleccion" target="_blank" rel="noopener">${ICONOS.ver}Ver en el sitio<span class="sr-only"> (abre en otra pestaña)</span></a>
+            <button type="button" class="js-copiar">${ICONOS.copiar}Copiar enlace</button>
+          </span>
+        </div>
+        <div class="linea-productos">
+          <a class="miniaturas" href="/admin/productos?linea=${esc(l.id)}">
+            ${ps.slice(0, 4).map((p) => `<img src="${esc(p.imagen_url || '/img/logo-badge.png')}" alt="" width="30" height="38" loading="lazy" decoding="async">`).join('')}
+            <span>${ps.length ? plural(ps.length, 'producto', 'productos') : 'Sin productos'}${ocultos ? ` · ${plural(ocultos, 'oculto', 'ocultos')}` : ''}</span>
+          </a>
+          <button type="button" class="btn btn-line btn-sm js-traer">${ICONOS.mas}Traer productos</button>
+          ${aviso ? `<small class="linea-aviso">${aviso}</small>` : ''}
+        </div>
+        ${migrado ? `
+        <div class="linea-campo" data-label="Ambientación">
+          <select class="select-linea js-tema" aria-label="Ambientación de ${n}">
+            <option value="">Estilo de siempre</option>
+            ${Object.entries(TEMAS_).map(([k, t]) => `<option value="${k}" ${k === tema ? 'selected' : ''}>${esc(t.nombre)}</option>`).join('')}
+          </select>
+        </div>
+        <div class="linea-campo" data-label="En el sitio">
+          <label class="visible-ctrl">
+            <span class="switch"><input type="checkbox" class="js-activo" ${activa ? 'checked' : ''}><span class="track"></span><span class="thumb"></span></span>
+            <span class="estado">${activa ? 'Visible' : 'Oculta'}</span>
+            <span class="sr-only"> en el sitio: ${n}</span>
+          </label>
+        </div>` : ''}
+        <div class="linea-acciones">
+          <button type="button" class="btn-icon peligro js-eliminar" aria-label="Eliminar la línea ${n}">${ICONOS.borrar}</button>
+        </div>
+      </li>`;
+    }
+
+    function render(enfocar?: string) {
+      lista.removeAttribute('aria-busy');
+      lista.classList.toggle('sin-migrar', !migrado);   // sin las columnas de ambientación y visibilidad
+      if (!lineas.length) {
+        lista.innerHTML = `<li class="tarjeta"><div class="vacio">
+          <b>Aún no hay líneas</b><p>Crea la primera con el botón “Nueva línea”.</p></div></li>`;
+        return;
+      }
+      lista.innerHTML = lineas.map(filaHTML).join('');
+      lista.querySelectorAll<HTMLLIElement>('li[data-id]').forEach(conectar);
+      if (enfocar) lista.querySelector<HTMLElement>(enfocar)?.focus();
+    }
+
+    function conectar(li: HTMLLIElement) {
+      const l = lineas.find((x) => x.id === li.dataset.id)!;
+      const sel = (s: string) => li.querySelector<HTMLElement>(s)!;
+
+      editarEnLinea(sel('[data-campo="nombre"]'), {
+        valor: l.nombre,
+        leer: (t: string) => {
+          const v = texto('El nombre', 40)(t);
+          if (lineas.some((x) => x.id !== l.id && mismoNombre(x.nombre, v))) throw new Error(`Ya existe una línea llamada “${v}”.`);
+          return v;
+        },
+        // El enlace sigue al nombre: un enlace viejo ya compartido no se
+        // rompe, solo abre la colección con "Todas".
+        guardar: async (v: string) => {
+          const slug = slugUnico(v, l.id);
+          await actualizar('lineas', l.id, { nombre: v, slug });
+          Object.assign(l, { nombre: v, slug });
+          (sel('.js-ver') as HTMLAnchorElement).href = `/?linea=${encodeURIComponent(slug)}#coleccion`;
+        },
+      });
+
+      li.querySelectorAll<HTMLButtonElement>('.js-mover').forEach((b) =>
+        b.addEventListener('click', () => mover(l, Number(b.dataset.dir))));
+
+      sel('.js-copiar').addEventListener('click', async () => {
+        try {
+          await navigator.clipboard.writeText(enlaceDe(l));
+          toast('Enlace copiado: compártelo en Instagram o WhatsApp');
+        } catch {
+          toast(`No se pudo copiar. El enlace es: ${enlaceDe(l)}`, 'error');
+        }
+      });
+
+      sel('.js-traer').addEventListener('click', () => abrirTraer(l));
+      sel('.js-eliminar').addEventListener('click', () => eliminarLinea(l));
+
+      const selTema = li.querySelector<HTMLSelectElement>('.js-tema');
+      selTema?.addEventListener('change', async () => {
+        const anterior = l.tema ?? '';
+        const nuevo = selTema.value;
+        selTema.disabled = true;
+        try {
+          await actualizar('lineas', l.id, { tema: nuevo || null });
+          l.tema = nuevo || null;
+          render(`li[data-id="${CSS.escape(l.id)}"] .js-tema`);
+          toast(nuevo ? `“${l.nombre}” ahora tiene la ambientación ${TEMAS_[nuevo].nombre}` : `“${l.nombre}” vuelve al estilo de siempre`);
+        } catch (err) {
+          selTema.value = anterior;
+          selTema.disabled = false;
+          toast(mensajeError(err), 'error');
+        }
+      });
+
+      const chk = li.querySelector<HTMLInputElement>('.js-activo');
+      chk?.addEventListener('change', async () => {
+        const activo = chk.checked;
+        chk.disabled = true;
+        try {
+          await actualizar('lineas', l.id, { activo });
+          l.activo = activo;
+          render(`li[data-id="${CSS.escape(l.id)}"] .js-activo`);
+          toast(activo ? `“${l.nombre}” ya se ve en el sitio` : `“${l.nombre}” y sus productos quedaron ocultos del sitio`);
+        } catch (err) {
+          chk.checked = !activo;
+          chk.disabled = false;
+          toast(mensajeError(err), 'error');
+        }
+      });
+    }
+
+    // ----------------------------------------------------------- ordenar ---
+    // Se reescribe el orden de todas (1, 2, 3…) y solo se guardan las que
+    // cambiaron: así un `orden` repetido de antes también queda corregido.
+    async function mover(l: Linea, dir: number) {
+      const i = lineas.indexOf(l), j = i + dir;
+      if (j < 0 || j >= lineas.length) return;
+      const nuevo = lineas.slice();
+      [nuevo[i], nuevo[j]] = [nuevo[j], nuevo[i]];
+      const cambios = nuevo.map((x, k) => ({ x, orden: k + 1 })).filter(({ x, orden }) => x.orden !== orden);
+      lista.setAttribute('aria-busy', 'true');
+      try {
+        await Promise.all(cambios.map(({ x, orden }) => actualizar('lineas', x.id, { orden })));
+        cambios.forEach(({ x, orden }) => { x.orden = orden; });
+        lineas = nuevo;
+        render();
+        // El foco sigue a la línea movida; si llegó al extremo, pasa a la otra flecha.
+        const fila = lista.querySelector(`li[data-id="${CSS.escape(l.id)}"]`);
+        (fila?.querySelector<HTMLElement>(`.js-mover[data-dir="${dir}"]:not([disabled])`)
+          ?? fila?.querySelector<HTMLElement>('.js-mover:not([disabled])'))?.focus();
+      } catch (err) {
+        toast(mensajeError(err), 'error');
+        await cargar();   // si quedó a medias, se vuelve a lo que dice la base de datos
+      }
+    }
+
+    // ---------------------------------------------------------- eliminar ---
+    const dlgElim = $<HTMLDialogElement>('dlgEliminar');
+    const elimDestino = $<HTMLSelectElement>('elimDestino');
+
+    async function eliminarLinea(l: Linea) {
+      const ps = deLinea(l.id);
+      const quitar = () => { lineas = lineas.filter((x) => x.id !== l.id); render(); };
+
+      if (!ps.length) {
+        const ok = await confirmar({
+          titulo: `¿Eliminar la línea “${l.nombre}”?`,
+          mensaje: 'No tiene productos, así que solo desaparece su botón de filtro del sitio.',
+        });
+        if (!ok) return;
+        try { await eliminar('lineas', l.id); quitar(); toast('Línea eliminada'); }
+        catch (err) { toast(mensajeError(err), 'error'); }
+        return;
+      }
+
+      const otras = lineas.filter((x) => x.id !== l.id);
+      if (!otras.length) { toast('Es tu única línea y tiene productos: crea otra antes de eliminarla.', 'error'); return; }
+
+      $('elimTitulo').textContent = `¿Eliminar la línea “${l.nombre}”?`;
+      $('elimTexto').textContent = `Tiene ${plural(ps.length, 'producto', 'productos')}. No se borran: pasan a la línea que elijas y luego se elimina “${l.nombre}”.`;
+      elimDestino.innerHTML = otras.map((x) => `<option value="${esc(x.id)}">${esc(x.nombre)}</option>`).join('');
+      dlgElim.returnValue = '';
+      dlgElim.showModal();
+      await new Promise((ok) => dlgElim.addEventListener('close', ok, { once: true }));
+      if (dlgElim.returnValue !== 'ok') return;
+
+      const destino = otras.find((x) => x.id === elimDestino.value)!;
+      try {
+        await actualizarVarios('productos', ps.map((p) => p.id), { linea_id: destino.id });
+        ps.forEach((p) => { p.linea_id = destino.id; });
+        await eliminar('lineas', l.id);
+        quitar();
+        toast(`Línea eliminada. Sus productos ahora están en “${destino.nombre}”.`);
+      } catch (err) {
+        toast(mensajeError(err), 'error');
+        render();   // los productos que sí se movieron ya se ven en su nueva línea
+      }
+    }
+
+    // ---------------------------------------------------- traer productos ---
+    const dlgTraer = $<HTMLDialogElement>('dlgTraer');
+    const traerLista = $('traerLista');
+    const traerBuscar = $<HTMLInputElement>('traerBuscar');
+    const traerOk = $<HTMLButtonElement>('traerOk');
+    const traerError = $('traerError');
+    let destinoTraer: Linea | null = null;
+    const marcados = new Set<string>();
+    // Búsqueda sin tildes ni mayúsculas ("pino" encuentra "Pino Mágico")
+    const normal = (s: string) => s.normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase().trim();
+
+    function pintarTraer() {
+      const d = destinoTraer!;
+      const q = normal(traerBuscar.value);
+      const grupos = lineas.filter((x) => x.id !== d.id).map((x) => {
+        const items = deLinea(x.id).filter((p) => !q || normal(p.nombre).includes(q));
+        if (!items.length) return '';
+        const todos = items.every((p) => marcados.has(p.id));
+        return `
+        <section class="grupo-traer" aria-label="Productos de ${esc(x.nombre)}">
+          <div class="grupo-cab">
+            <span>${esc(x.nombre)}</span>
+            <button type="button" class="js-todos" data-linea="${esc(x.id)}">${todos ? 'Desmarcar todos' : 'Marcar todos'}</button>
+          </div>
+          ${items.map((p) => `
+          <label class="item-traer">
+            <input type="checkbox" value="${esc(p.id)}" ${marcados.has(p.id) ? 'checked' : ''}>
+            <img src="${esc(p.imagen_url || '/img/logo-badge.png')}" alt="" width="40" height="50" loading="lazy" decoding="async">
+            <span>${esc(p.nombre)}${p.activo ? '' : ' <em>Oculto</em>'}</span>
+          </label>`).join('')}
+        </section>`;
+      }).join('');
+      traerLista.innerHTML = grupos || `<p class="opciones-vacio">${q ? 'Ningún producto coincide con esa búsqueda.' : 'No hay productos en otras líneas.'}</p>`;
+      const n = marcados.size;
+      traerOk.disabled = n === 0;
+      traerOk.textContent = n ? `Mover ${plural(n, 'producto', 'productos')}` : 'Mover productos';
+    }
+
+    function abrirTraer(l: Linea) {
+      destinoTraer = l;
+      marcados.clear();
+      traerBuscar.value = '';
+      traerError.hidden = true;
+      $('traerTitulo').textContent = `Traer productos a “${l.nombre}”`;
+      pintarTraer();
+      dlgTraer.showModal();
+      traerBuscar.focus();
+    }
+
+    traerLista.addEventListener('change', (e) => {
+      const chk = e.target as HTMLInputElement;
+      if (chk.type !== 'checkbox') return;
+      if (chk.checked) marcados.add(chk.value); else marcados.delete(chk.value);
+      pintarTraer();
+      traerLista.querySelector<HTMLInputElement>(`input[value="${CSS.escape(chk.value)}"]`)?.focus();
+    });
+    traerLista.addEventListener('click', (e) => {
+      const b = (e.target as HTMLElement).closest<HTMLButtonElement>('.js-todos');
+      if (!b) return;
+      const q = normal(traerBuscar.value);
+      const items = deLinea(b.dataset.linea!).filter((p) => !q || normal(p.nombre).includes(q));
+      const todos = items.every((p) => marcados.has(p.id));
+      items.forEach((p) => (todos ? marcados.delete(p.id) : marcados.add(p.id)));
+      pintarTraer();
+      traerLista.querySelector<HTMLElement>(`.js-todos[data-linea="${CSS.escape(b.dataset.linea!)}"]`)?.focus();
+    });
+    let esperaTraer: ReturnType<typeof setTimeout>;
+    traerBuscar.addEventListener('input', () => { clearTimeout(esperaTraer); esperaTraer = setTimeout(pintarTraer, 120); });
+    $('traerCancelar').addEventListener('click', () => dlgTraer.close());
+    dlgTraer.addEventListener('click', (e) => { if (e.target === dlgTraer) dlgTraer.close(); });
+
+    traerOk.addEventListener('click', async () => {
+      const d = destinoTraer!;
+      const ids = [...marcados];
+      traerOk.disabled = true;
+      traerOk.setAttribute('aria-busy', 'true');
+      traerError.hidden = true;
+      try {
+        await actualizarVarios('productos', ids, { linea_id: d.id });
+        productos.forEach((p) => { if (marcados.has(p.id)) p.linea_id = d.id; });
+        dlgTraer.close();
+        render();
+        toast(`${plural(ids.length, 'producto pasó', 'productos pasaron')} a “${d.nombre}”`);
+      } catch (err) {
+        // Dentro del diálogo un aviso flotante quedaría detrás del fondo oscuro.
+        traerError.textContent = mensajeError(err);
+        traerError.hidden = false;
+        traerOk.disabled = false;
+      } finally {
+        traerOk.removeAttribute('aria-busy');
+      }
+    });
+
+    // ------------------------------------------------------ alta nueva ---
+    const panel = $('panelAlta');
+    const form = $<HTMLFormElement>('formAlta');
+    const btnNueva = $<HTMLButtonElement>('btnNueva');
+    const btnGuardar = $<HTMLButtonElement>('btnGuardar');
+    const nNombre = $<HTMLInputElement>('n-nombre');
+
+    function abrirAlta(abrir: boolean) {
+      panel.hidden = !abrir;
+      btnNueva.setAttribute('aria-expanded', String(abrir));
+      if (abrir) { panel.scrollIntoView({ behavior: 'smooth', block: 'start' }); nNombre.focus({ preventScroll: true }); }
+      else { form.reset(); errorDeCampo(nNombre, ''); }
+    }
+    btnNueva.addEventListener('click', () => abrirAlta(panel.hidden));
+    $('btnCancelar').addEventListener('click', () => { abrirAlta(false); btnNueva.focus(); });
+
+    form.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const nombre = nNombre.value.trim();
+      const error = !nombre ? 'Escribe el nombre de la línea.'
+        : lineas.some((x) => mismoNombre(x.nombre, nombre)) ? `Ya existe una línea llamada “${nombre}”.` : '';
+      if (!errorDeCampo(nNombre, error)) { nNombre.focus(); return; }
+
+      const fila: Record<string, unknown> = {
+        nombre,
+        slug: slugUnico(nombre),
+        orden: lineas.reduce((m, x) => Math.max(m, x.orden), 0) + 1,
+      };
+      if (migrado) {
+        fila.tema = form.querySelector<HTMLInputElement>('input[name="n-tema"]:checked')?.value || null;
+        fila.activo = true;
+      }
+
+      btnGuardar.disabled = true;
+      btnGuardar.setAttribute('aria-busy', 'true');
+      try {
+        const nueva = await insertar('lineas', fila) as Linea;
+        lineas.push(nueva);
+        abrirAlta(false);
+        render();
+        const li = lista.querySelector<HTMLElement>(`li[data-id="${CSS.escape(nueva.id)}"]`);
+        li?.classList.add('recien');
+        li?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        toast(`Línea “${nueva.nombre}” creada`);
+        // Una línea recién creada está vacía: lo siguiente es llenarla.
+        if (productos.length) abrirTraer(nueva);
+      } catch (err) {
+        toast(mensajeError(err), 'error');
+      } finally {
+        btnGuardar.disabled = false;
+        btnGuardar.removeAttribute('aria-busy');
+      }
+    });
+
+    await cargar();
+  </script>
+</AdminLayout>

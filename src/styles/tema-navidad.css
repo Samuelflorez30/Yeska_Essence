@@ -1,0 +1,241 @@
+/* ============================================================================
+   Ambientación "Navidad" de la colección
+   Solo existe mientras el cliente tiene elegida una línea con tema navidad:
+   el script pone html[data-linea-tema="navidad"] y todo cuelga de ahí. El
+   resto del sitio no cambia. La colección se vuelve una noche de pino vista
+   a través del arco de la marca: nieve, una guirnalda de luces, esferas que
+   bajan del borde y ramas escarchadas; abajo, un banco de nieve que se funde
+   con el nude de la sección siguiente. Todo es aria-hidden y sin clics.
+   ============================================================================ */
+
+:root {
+  --nv-noche:  #0F2118;   /* arriba: noche cerrada */
+  --nv-pino:   #17311F;
+  --nv-pino-2: #1D3B28;
+  --nv-rojo:   #9E2B33;   /* chip activo: crema encima mide 6.7:1 */
+  --nv-rojo-t: #8E2A33;   /* rojo para texto sobre blanco: 8:1 */
+  --nv-oro:    #E9CF7A;   /* sobre la noche: 11:1 */
+  --nv-crema:  #F7F0EA;   /* sobre la noche: 15:1 */
+  --nv-crema-suave: rgba(247, 240, 234, .84);
+  --nv-dur: .8s;
+}
+
+/* ----------------------------------------------- piezas comunes del tema --- */
+/* El contenido de la colección va por encima de la escena (sin z-index, para
+   no crear un contexto de apilado: el polvo dorado sigue pasando por encima). */
+#coleccion > .wrap { position: relative; }
+
+/* Cabeceras apiladas en la misma celda: la de la temporada entra cruzándose
+   con la de siempre y la barra de filtros no se mueve. */
+.cabecera-coleccion { display: grid; }
+.cabecera-coleccion > .cab {
+  grid-area: 1 / 1; display: grid; gap: 14px; align-content: start;
+  transition: opacity .6s var(--ease), transform .6s var(--ease), visibility 0s;
+}
+.cabecera-coleccion > .cab[inert] { opacity: 0; visibility: hidden; transform: translateY(12px); transition: opacity .45s var(--ease), transform .45s var(--ease), visibility 0s .45s; }
+
+/* Copo de nieve reutilizable (máscara: toma el color del texto) */
+.chip[data-tema="navidad"]::before, .tag[data-tema="navidad"]::before {
+  content: ""; flex: none; background: currentColor;
+  -webkit-mask: var(--copo) center / contain no-repeat; mask: var(--copo) center / contain no-repeat;
+}
+:root {
+  --copo: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M12 12V2.5M9 5l3 3 3-3'/%3E%3Cpath transform='rotate(60 12 12)' d='M12 12V2.5M9 5l3 3 3-3'/%3E%3Cpath transform='rotate(120 12 12)' d='M12 12V2.5M9 5l3 3 3-3'/%3E%3Cpath transform='rotate(180 12 12)' d='M12 12V2.5M9 5l3 3 3-3'/%3E%3Cpath transform='rotate(240 12 12)' d='M12 12V2.5M9 5l3 3 3-3'/%3E%3Cpath transform='rotate(300 12 12)' d='M12 12V2.5M9 5l3 3 3-3'/%3E%3C/svg%3E");
+}
+
+/* El botón de la línea navideña se distingue aun sin elegirlo: invita al clic */
+.chip[data-tema="navidad"] {
+  display: inline-flex; align-items: center; gap: 7px;
+  color: var(--nv-rojo-t); border-color: rgba(168, 50, 60, .45);
+}
+.chip[data-tema="navidad"]::before { width: 13px; height: 13px; transition: transform .7s var(--ease); }
+.chip[data-tema="navidad"]:hover { color: var(--nv-rojo-t); border-color: var(--nv-rojo); }
+.chip[data-tema="navidad"]:hover::before { transform: rotate(60deg); }
+.chip[data-tema="navidad"][aria-pressed="true"] {
+  background: var(--nv-rojo); border-color: var(--nv-oro); color: #FFF8EE;
+  box-shadow: 0 0 0 3px rgba(233, 207, 122, .25), 0 10px 24px -10px rgba(217, 80, 90, .8);
+}
+
+/* Etiqueta de las piezas navideñas (en "Todas" y en el detalle) */
+.tag[data-tema="navidad"] { display: inline-flex; align-items: center; gap: 5px; color: var(--nv-rojo-t); }
+.tag[data-tema="navidad"]::before { width: 10px; height: 10px; }
+.qv-temporada {
+  margin: 0; padding: 10px 14px; border-radius: 14px; font-size: .85rem; line-height: 1.5;
+  background: rgba(158, 43, 51, .07); border: 1px solid rgba(158, 43, 51, .2); color: var(--tinta);
+}
+
+/* Fila del conteo: la cuenta regresiva ocupa su lugar siempre (invisible
+   fuera del tema), así elegir Navidad no empuja la grilla. */
+.conteo-fila { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 14px; margin: 0 0 22px; }
+.conteo-fila .count { margin: 0; transition: color var(--nv-dur) var(--ease); }
+.cuenta-navidad {
+  display: inline-flex; align-items: center; gap: 8px; margin: 0; padding: 5px 14px 5px 10px; border-radius: 999px;
+  font-size: .8rem; font-weight: 700; letter-spacing: .02em; color: var(--nv-oro);
+  background: rgba(233, 207, 122, .1); border: 1px solid rgba(233, 207, 122, .4);
+  opacity: 0; visibility: hidden; transform: translateY(6px);
+  transition: opacity .5s var(--ease), transform .5s var(--ease), visibility 0s .5s;
+}
+.cuenta-navidad svg { width: 15px; height: 15px; flex: none; }
+
+/* ------------------------------------------------------------- la escena --- */
+.tema-escena {
+  position: absolute; inset: 0; pointer-events: none;
+  overflow: hidden; overflow: clip;   /* clip no rompe el sticky de la nieve */
+  opacity: 0; visibility: hidden;
+  transition: opacity var(--nv-dur) var(--ease), visibility 0s var(--nv-dur);
+  /* Medidas en px y no en %: la sección mide ~3000px y un brillo en % sería
+     gigante. Ningún brillo toca el borde de arriba: ahí el fondo es noche
+     pura, igual al relleno del arco, y no se ve la costura entre los dos. */
+  background:
+    radial-gradient(1000px 460px at 30% 430px, rgba(233, 207, 122, .11), transparent 70%),
+    radial-gradient(640px 520px at 4% 900px, rgba(61, 117, 80, .36), transparent 70%),
+    radial-gradient(720px 620px at 98% 1500px, rgba(61, 117, 80, .26), transparent 70%),
+    radial-gradient(900px 600px at 40% 2300px, rgba(233, 207, 122, .06), transparent 70%),
+    linear-gradient(180deg, var(--nv-noche) 0, var(--nv-pino) 900px, var(--nv-pino-2) 70%, var(--nv-pino) 100%);
+}
+
+/* Nieve: lienzo del alto de la ventana que se queda pegado mientras la
+   sección pasa (el script dibuja; aquí solo se ubica). */
+.tema-nieve { position: sticky; top: 0; display: block; width: 100%; height: 100vh; margin-bottom: -100vh; }
+
+/* Guirnalda de luces a lo ancho del borde superior */
+.tema-guirnalda { position: absolute; left: 0; top: 0; width: 100%; height: clamp(64px, 8.2vw, 118px); overflow: visible; }
+.tema-guirnalda .cable { fill: none; stroke: #C49A45; stroke-opacity: .75; stroke-width: 1.4; }
+.tema-guirnalda .casquillo { fill: #B8913F; }
+.tema-guirnalda .reflejo { fill: #fff; opacity: .5; }
+.f-oro .bombillo    { fill: #F3D57E; } .halo-oro    { stop-color: #FFDE85; }
+.f-rojo .bombillo   { fill: #E2535D; } .halo-rojo   { stop-color: #FF6B75; }
+.f-verde .bombillo  { fill: #6FC08A; } .halo-verde  { stop-color: #7DE09C; }
+.f-blanco .bombillo { fill: #FFF3D1; } .halo-blanco { stop-color: #FFF6DC; }
+/* Apagadas hasta que entra el tema; luego se encienden una tras otra */
+.tema-guirnalda .bombillo { fill-opacity: .28; transition: fill-opacity .3s ease; }
+.tema-guirnalda .luz { opacity: 0; transition: opacity .3s ease; }
+.tema-guirnalda .halo { animation: nv-titilar calc(2.2s + var(--d)) ease-in-out calc(var(--d) * -1) infinite; animation-play-state: paused; }
+@keyframes nv-titilar { 0%, 100% { opacity: 1; } 50% { opacity: .3; } }
+
+/* Esferas colgantes: el envoltorio baja (transición), el cuerpo se mece
+   (animación): dos transforms en dos elementos, nunca se pisan. */
+.esfera {
+  position: absolute; top: 0; right: var(--x); width: var(--tam); display: block;
+  transform: translateY(calc(-100% - var(--largo) - 24px));
+  transition: transform .9s cubic-bezier(.3, 1.45, .5, 1);
+}
+.esfera-cuerpo {
+  position: relative; display: block; padding-top: var(--largo); transform-origin: 50% 0;
+  animation: nv-mecer var(--mecer) ease-in-out infinite alternate; animation-play-state: paused;
+  filter: drop-shadow(0 10px 12px rgba(0, 0, 0, .35));
+}
+.esfera-cuerpo::before {
+  content: ""; position: absolute; top: 0; left: 50%; width: 1px; height: calc(var(--largo) + 4px);
+  background: linear-gradient(rgba(196, 154, 69, .35), #E9CF7A); transform: translateX(-50%);
+}
+.esfera-cuerpo svg { display: block; width: 100%; height: auto; }
+@keyframes nv-mecer { from { rotate: -4deg; } to { rotate: 4deg; } }
+
+/* Ramas de pino escarchadas en las esquinas de arriba */
+.tema-rama {
+  position: absolute; top: -10px; width: clamp(160px, 19vw, 280px); height: auto; overflow: visible;
+  opacity: 0; transition: opacity .7s var(--ease), translate .9s var(--ease);
+  translate: 0 -22px;
+}
+.tema-rama.izq { left: -16px; rotate: -3deg; }
+.tema-rama.der { right: -16px; scale: -1 1; rotate: 4deg; }
+.tema-rama .tallo { fill: none; stroke: #5A3B22; stroke-width: 2.6; stroke-linecap: round; }
+.tema-rama .aguja { fill: none; stroke-width: 2; stroke-linecap: round; }
+.tema-rama .a0 { stroke: #3D7A52; } .tema-rama .a1 { stroke: #5A9A6C; } .tema-rama .a2 { stroke: #2C5E3E; }
+.tema-rama .escarcha { fill: none; stroke: rgba(240, 249, 244, .9); stroke-width: 2; stroke-linecap: round; }
+.tema-rama .bayas circle { fill: #C3343F; stroke: #6E1219; stroke-width: .8; }
+
+/* Estrellas en el arco que da paso a la colección (el arco se vuelve cielo) */
+.transicion .arco-svg path { transition: fill var(--nv-dur) var(--ease); }
+.tema-estrellas { position: absolute; inset: 0; pointer-events: none; }
+.tema-estrellas i {
+  position: absolute; left: var(--x); top: var(--y); width: var(--s); height: var(--s); translate: -50% -50%;
+  background: radial-gradient(circle, #FFF8E0 0 22%, #E9CF7A 40%, transparent 72%);
+  clip-path: polygon(50% 0, 60% 40%, 100% 50%, 60% 60%, 50% 100%, 40% 60%, 0 50%, 40% 40%);
+  opacity: 0; transition: opacity .6s var(--ease);
+}
+
+/* Banco de nieve al pie: se funde con el nude de Recordatorios */
+.tema-ventisquero {
+  position: absolute; left: 0; bottom: -1px; width: 100%; height: clamp(54px, 7.5vw, 110px);
+  opacity: 0; translate: 0 30%; transition: opacity var(--nv-dur) var(--ease) .15s, translate 1s var(--ease) .15s;
+}
+.tema-ventisquero .atras { fill: #DCE8E2; }   /* nieve en sombra, detrás del banco */
+
+/* ============================================================ TEMA ACTIVO === */
+/* la escena y sus piezas */
+html[data-linea-tema="navidad"] .tema-escena { opacity: 1; visibility: visible; transition: opacity var(--nv-dur) var(--ease), visibility 0s; }
+html[data-linea-tema="navidad"] .tema-guirnalda .bombillo { fill-opacity: 1; transition-delay: calc(var(--i) * 45ms + .3s); }
+html[data-linea-tema="navidad"] .tema-guirnalda .luz { opacity: 1; transition-delay: calc(var(--i) * 45ms + .3s); }
+html[data-linea-tema="navidad"] .tema-guirnalda .halo, html[data-linea-tema="navidad"] .esfera-cuerpo { animation-play-state: running; }
+html[data-linea-tema="navidad"] .esfera { transform: none; transition-delay: calc(var(--i) * 130ms + .25s); }
+html[data-linea-tema="navidad"] .tema-rama { opacity: 1; translate: 0 0; }
+html[data-linea-tema="navidad"] .tema-ventisquero { opacity: 1; translate: 0 0; }
+html[data-linea-tema="navidad"] .transicion.a-lienzo .arco-svg path { fill: var(--nv-noche); }
+html[data-linea-tema="navidad"] .tema-estrellas i { opacity: 1; animation: nv-titilar calc(2.6s + var(--d)) ease-in-out calc(var(--d) * -1) infinite; }
+
+/* El vidrio del header es translúcido: sobre la noche se ensuciaba. Durante
+   la ambientación gana opacidad y sigue siendo el malva de la marca. */
+html[data-linea-tema="navidad"] .nav.scrolled { background: color-mix(in srgb, var(--malva) 94%, transparent); }
+
+/* textos sobre la noche */
+html[data-linea-tema="navidad"] #coleccion .count { color: var(--nv-crema-suave); }
+html[data-linea-tema="navidad"] #coleccion .cuenta-navidad { opacity: 1; visibility: visible; transform: none; transition: opacity .5s var(--ease) .35s, transform .5s var(--ease) .35s, visibility 0s; }
+html[data-linea-tema="navidad"] #coleccion .empty p { color: var(--nv-crema-suave); }
+
+/* filtros y herramientas */
+html[data-linea-tema="navidad"] #coleccion .chip { background: rgba(255, 255, 255, .07); border-color: rgba(233, 207, 122, .42); color: var(--nv-crema); }
+html[data-linea-tema="navidad"] #coleccion .chip:hover { border-color: var(--nv-oro); color: #fff; }
+html[data-linea-tema="navidad"] #coleccion .chip[aria-pressed="true"] {
+  background: var(--nv-rojo); border-color: var(--nv-oro); color: #FFF8EE;
+  box-shadow: 0 0 0 3px rgba(233, 207, 122, .22), 0 10px 26px -8px rgba(217, 80, 90, .75);
+}
+html[data-linea-tema="navidad"] #coleccion :is(.search, .sort-btn) { border-color: rgba(233, 207, 122, .55); }
+
+/* tarjetas: papel crema con filete de oro y un moño de regalo arriba */
+html[data-linea-tema="navidad"] #coleccion .card {
+  background: #FFFCF7;
+  box-shadow: 0 26px 50px -24px rgba(0, 0, 0, .7), 0 0 0 1.5px rgba(233, 207, 122, .8), 0 12px 36px -14px rgba(233, 207, 122, .38);
+}
+html[data-linea-tema="navidad"] #coleccion .card:hover {
+  box-shadow: 0 34px 64px -24px rgba(0, 0, 0, .75), 0 0 0 1.5px var(--nv-oro), 0 18px 50px -12px rgba(233, 207, 122, .6);
+}
+html[data-linea-tema="navidad"] #coleccion .card::before {
+  content: ""; position: absolute; top: -17px; left: 50%; z-index: 3; width: 58px; height: 40px;
+  translate: -50% 0; pointer-events: none;
+  background: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 60 42'%3E%3Cdefs%3E%3ClinearGradient id='r' x1='0' y1='0' x2='0' y2='1'%3E%3Cstop offset='0' stop-color='%23DA4D5A'/%3E%3Cstop offset='1' stop-color='%238A1D29'/%3E%3C/linearGradient%3E%3C/defs%3E%3Cpath d='M27 20 15.5 39.5l5.2-1.6 2.4 4L30 23Z' fill='%23801A26'/%3E%3Cpath d='M33 20l11.5 19.5-5.2-1.6-2.4 4L30 23Z' fill='%23801A26'/%3E%3Cpath d='M30 19C22 4.5 5 2.5 4.2 13 3.5 23 20 25.5 30 21Z' fill='url(%23r)' stroke='%23E9CF7A' stroke-width='1.1'/%3E%3Cpath d='M30 19C38 4.5 55 2.5 55.8 13 56.5 23 40 25.5 30 21Z' fill='url(%23r)' stroke='%23E9CF7A' stroke-width='1.1'/%3E%3Cpath d='M12 11.5c4-3 10-1.5 13 3' fill='none' stroke='%23fff' stroke-opacity='.35' stroke-width='1.4' stroke-linecap='round'/%3E%3Crect x='25.5' y='14.5' width='9' height='10' rx='3.4' fill='%23B32F3C' stroke='%23E9CF7A' stroke-width='1.1'/%3E%3C/svg%3E") center / contain no-repeat;
+  filter: drop-shadow(0 5px 6px rgba(0, 0, 0, .35));
+  animation: nv-mono .55s cubic-bezier(.3, 1.6, .5, 1) .25s both;
+}
+html[data-linea-tema="navidad"] #coleccion .tag[data-tema="navidad"] { background: var(--nv-rojo); color: #FFF8EE; }
+@keyframes nv-mono { from { opacity: 0; scale: .3; rotate: -12deg; } to { opacity: 1; scale: 1; rotate: 0deg; } }
+
+/* Cabecera de la temporada: crema y oro claro sobre la noche */
+#coleccion .cab-navidad .eyebrow { color: var(--nv-oro); }
+#coleccion .cab-navidad .eyebrow::before { background: var(--nv-oro); }
+#coleccion .cab-navidad h2 { color: var(--nv-crema); }
+#coleccion .cab-navidad p { color: var(--nv-crema-suave); }
+#coleccion .cab-navidad .gold { background-image: linear-gradient(110deg, #C49A45 0%, #E9CF7A 28%, #FFF3C9 50%, #E9CF7A 72%, #C49A45 100%); }
+#coleccion .cab-base :is(h2, p, .eyebrow) { transition: color var(--nv-dur) var(--ease); }
+
+/* --------------------------------------------------------------- tamaños --- */
+@media (max-width: 1100px) {
+  .esfera[data-tier="b"] { display: none; }
+}
+@media (max-width: 767px) {
+  .esfera { width: calc(var(--tam) * .7); }
+  .esfera-cuerpo { padding-top: calc(var(--largo) * .45); }
+  .esfera-cuerpo::before { height: calc(var(--largo) * .45 + 4px); }
+  .tema-rama { width: 132px; top: -14px; }
+  .tema-rama.izq { left: -30px; }
+  .tema-rama.der { display: none; }
+  .tema-estrellas i:nth-child(n + 6) { display: none; }
+}
+
+/* ----------------------------------------------------- movimiento reducido --- */
+/* La escena aparece completa y quieta: sin nieve, sin vaivén ni titileo. */
+@media (prefers-reduced-motion: reduce) {
+  .tema-nieve { display: none; }
+  .esfera-cuerpo, .tema-guirnalda .halo, .tema-estrellas i { animation: none !important; }
+}
